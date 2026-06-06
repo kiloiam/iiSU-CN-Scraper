@@ -1,6 +1,0 @@
-{
-  "llm_base_url": "https://api.deepseek.com/v1",
-  "llm_api_key": "",
-  "llm_model": "deepseek-chat",
-  "tgdb_api_key": ""
-}
