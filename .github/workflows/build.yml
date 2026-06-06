@@ -20,7 +20,7 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk \
+          yes | flet build apk \
             --project "iiSU CN Scraper" \
             --org com.iisucn.scraper \
             --product "iiSU CN Scraper" \
