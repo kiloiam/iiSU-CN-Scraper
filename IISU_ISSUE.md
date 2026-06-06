@@ -65,5 +65,5 @@ iiSU already supports "Link ES-DE Metadata" in ROM Import. This tool generates t
 iiSU 的 ROM 导入已支持"链接 ES-DE 元数据"。此工具为中文 ROM 自动生成这些元数据，填补了 ScreenScraper 等英文优先刮削器留下的生态空白。
 
 ---
-**Project Repository:** [GitHub link to be added]
-**APK Download:** [Release link to be added]
+**Project Repository:** https://github.com/kiloiam/iiSU-CN-Scraper
+**APK Download:** Coming soon (see BUILD_COLAB.md in repo)
