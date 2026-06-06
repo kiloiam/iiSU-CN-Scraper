@@ -30,4 +30,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: iiSU-CN-Scraper-APK
-          path: build/apk/*.apk
+          path: build/apk/app-release.apk
