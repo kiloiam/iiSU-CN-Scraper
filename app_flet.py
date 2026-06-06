@@ -522,25 +522,41 @@ def main(page: ft.Page):
             visible=False,
         )
 
-        # 文件夹选择
-        def pick_folder(e):
-            try:
-                from tkinter import Tk, filedialog
-                root = Tk()
-                root.withdraw()
-                root.attributes("-topmost", True)
-                path = filedialog.askdirectory(title="选择 ROM 文件夹")
-                root.destroy()
-                if path:
-                    state.rom_dir = path
-                    picked_path.value = path
+        # 文件夹选择 (Android: Flet FilePicker / 桌面: tkinter)
+        if sys.platform == "win32" or sys.platform == "darwin":
+            # 桌面端：tkinter 系统对话框
+            def pick_folder(e):
+                try:
+                    from tkinter import Tk, filedialog
+                    root = Tk()
+                    root.withdraw()
+                    root.attributes("-topmost", True)
+                    path = filedialog.askdirectory(title="选择 ROM 文件夹")
+                    root.destroy()
+                    if path:
+                        state.rom_dir = path
+                        picked_path.value = path
+                        scrape_from_settings_btn.visible = True
+                        selected_box.visible = True
+                except Exception:
+                    picked_path.value = "请使用自动检测功能"
+                page.update()
+        else:
+            # 安卓端：Flet FilePicker
+            def _on_fp_result(e):
+                if e.path and os.path.isdir(e.path):
+                    state.rom_dir = e.path
+                    picked_path.value = e.path
                     scrape_from_settings_btn.visible = True
                     selected_box.visible = True
-                else:
-                    picked_path.value = "未选择目录"
-            except Exception as ex:
-                picked_path.value = f"无法打开: {ex}"
-            page.update()
+                    page.update()
+
+            fp = ft.FilePicker()
+            fp.on_result = _on_fp_result
+            page.overlay.append(fp)
+
+            def pick_folder(e):
+                page.run_task(fp.get_directory_path, "选择 ROM 文件夹")
 
         def do_detect(e):
             dir_list.controls.clear()
