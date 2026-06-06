@@ -1,0 +1,395 @@
+#:import dp kivy.metrics.dp
+
+<Label>:
+    font_name: app.font_name
+<Button>:
+    font_name: app.font_name
+<TextInput>:
+    font_name: app.font_name
+
+# ---- HomeScreen ----
+<HomeScreen>:
+    BoxLayout:
+        orientation: "vertical"
+        canvas.before:
+            Color:
+                rgba: 0.063, 0.063, 0.090, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        BoxLayout:
+            size_hint_y: None
+            height: dp(56)
+            padding: [dp(20), dp(8)]
+            Label:
+                text: "iiSU CN Scraper"
+                font_size: "18sp"
+                bold: True
+                color: 0.91, 0.91, 0.91, 1
+                halign: "left"
+                valign: "middle"
+                size_hint_x: 0.8
+            Button:
+                text: ""
+                size_hint_x: 0.2
+                size_hint_y: None
+                height: dp(40)
+                background_normal: ""
+                background_color: [0,0,0,0]
+                on_release: root.open_settings()
+        BoxLayout:
+            orientation: "vertical"
+            padding: [dp(20), dp(20)]
+            BoxLayout:
+                size_hint_y: 0.15
+            BoxLayout:
+                size_hint_y: 0.55
+                orientation: "vertical"
+                Widget:
+                    size_hint_y: 0.25
+                BoxLayout:
+                    size_hint: None, None
+                    width: dp(180)
+                    height: dp(180)
+                    pos_hint: {"center_x": 0.5}
+                    canvas.before:
+                        Color:
+                            rgba: 0.49, 0.23, 0.93, 1
+                        Ellipse:
+                            pos: [-dp(4), -dp(4)]
+                            size: [dp(188), dp(188)]
+                        Color:
+                            rgba: 0.063, 0.063, 0.090, 1
+                        Ellipse:
+                            pos: [0, 0]
+                            size: [dp(180), dp(180)]
+                        Color:
+                            rgba: 0.49, 0.23, 0.93, 1
+                        Line:
+                            circle: [dp(90), dp(90), dp(88)]
+                            width: 2.5
+                    Button:
+                        size_hint: None, None
+                        width: dp(180)
+                        height: dp(180)
+                        pos_hint: {"center_x": 0.5}
+                        background_normal: ""
+                        background_color: [0,0,0,0]
+                        on_press: root.detect_press()
+                        on_release: root.detect_release()
+                        BoxLayout:
+                            orientation: "vertical"
+                            spacing: dp(4)
+                            Label:
+                                text: "检测 ROM"
+                                font_size: "16sp"
+                                bold: True
+                                color: 0.91, 0.91, 0.91, 1
+                                halign: "center"
+                            Label:
+                                id: circle_sub
+                                text: "Directory"
+                                font_size: "11sp"
+                                color: 0.55, 0.55, 0.60, 1
+                                halign: "center"
+                Widget:
+                    size_hint_y: 0.20
+        BoxLayout:
+            size_hint_y: None
+            height: dp(80)
+            padding: [dp(30), dp(10)]
+            Label:
+                id: home_status
+                text: "点击圆形按钮自动检测 ROM 目录"
+                font_size: "12sp"
+                color: 0.55, 0.55, 0.60, 1
+                halign: "center"
+                valign: "middle"
+
+
+# ---- SettingsScreen ----
+<SettingsScreen>:
+    BoxLayout:
+        orientation: "vertical"
+        padding: [0, dp(30), 0, dp(16)]
+        canvas.before:
+            Color:
+                rgba: 0.063, 0.063, 0.090, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        BoxLayout:
+            size_hint_y: None
+            height: dp(50)
+            padding: [dp(20), dp(4)]
+            Button:
+                text: "< 返回"
+                size_hint_x: 0.25
+                background_normal: ""
+                background_color: [0,0,0,0]
+                color: 0.49, 0.23, 0.93, 1
+                font_size: "13sp"
+                on_release: app.root.current = "home"
+            Label:
+                text: "设置"
+                font_size: "18sp"
+                bold: True
+                color: 0.91, 0.91, 0.91, 1
+                halign: "left"
+                valign: "middle"
+                size_hint_x: 0.75
+        ScrollView:
+            do_scroll_x: False
+            BoxLayout:
+                orientation: "vertical"
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(16)
+                padding: [dp(20), dp(10)]
+
+                # ROM 目录
+                BoxLayout:
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: dp(220)
+                    spacing: dp(8)
+                    padding: [dp(16), dp(14)]
+                    canvas.before:
+                        Color:
+                            rgba: 0.094, 0.094, 0.125, 1
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(12)]
+                    Label:
+                        text: "ROM 目录"
+                        font_size: "14sp"
+                        bold: True
+                        color: 0.49, 0.23, 0.93, 1
+                        size_hint_y: None
+                        height: dp(24)
+                        halign: "left"
+                    Button:
+                        text: "自动检测"
+                        size_hint_y: None
+                        height: dp(40)
+                        background_normal: ""
+                        background_color: 0.125, 0.125, 0.157, 1
+                        color: 0.91, 0.91, 0.91, 1
+                        font_size: "13sp"
+                        on_release: root.auto_detect()
+                    ScrollView:
+                        do_scroll_x: False
+                        size_hint_y: None
+                        height: dp(80)
+                        GridLayout:
+                            id: set_dir_list
+                            cols: 1
+                            size_hint_y: None
+                            height: self.minimum_height
+                            spacing: dp(2)
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(8)
+                        TextInput:
+                            id: set_manual_path
+                            hint_text: "手动输入..."
+                            multiline: False
+                            background_color: 0.125, 0.125, 0.157, 1
+                            foreground_color: 0.91, 0.91, 0.91, 1
+                            cursor_color: 0.49, 0.23, 0.93, 1
+                            padding: [dp(12), dp(10)]
+                            font_size: "12sp"
+                        Button:
+                            text: "使用"
+                            size_hint_x: 0.3
+                            background_normal: ""
+                            background_color: 0.49, 0.23, 0.93, 1
+                            color: 0.91, 0.91, 0.91, 1
+                            font_size: "12sp"
+                            on_release: root.apply_manual()
+
+                # LLM
+                BoxLayout:
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: dp(180)
+                    spacing: dp(8)
+                    padding: [dp(16), dp(14)]
+                    canvas.before:
+                        Color:
+                            rgba: 0.094, 0.094, 0.125, 1
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(12)]
+                    Label:
+                        text: "AI 语义清洗 (LLM)"
+                        font_size: "14sp"
+                        bold: True
+                        color: 0.49, 0.23, 0.93, 1
+                        size_hint_y: None
+                        height: dp(24)
+                        halign: "left"
+                    TextInput:
+                        id: set_llm_url
+                        text: app.llm_base_url
+                        hint_text: "API 地址"
+                        size_hint_y: None
+                        height: dp(42)
+                        multiline: False
+                        background_color: 0.125, 0.125, 0.157, 1
+                        foreground_color: 0.91, 0.91, 0.91, 1
+                        cursor_color: 0.49, 0.23, 0.93, 1
+                        padding: [dp(12), dp(10)]
+                        font_size: "12sp"
+                    TextInput:
+                        id: set_llm_key
+                        hint_text: "API Key"
+                        password: True
+                        size_hint_y: None
+                        height: dp(42)
+                        multiline: False
+                        background_color: 0.125, 0.125, 0.157, 1
+                        foreground_color: 0.91, 0.91, 0.91, 1
+                        cursor_color: 0.49, 0.23, 0.93, 1
+                        padding: [dp(12), dp(10)]
+                        font_size: "12sp"
+                    TextInput:
+                        id: set_llm_model
+                        text: app.llm_model
+                        hint_text: "模型名称"
+                        size_hint_y: None
+                        height: dp(42)
+                        multiline: False
+                        background_color: 0.125, 0.125, 0.157, 1
+                        foreground_color: 0.91, 0.91, 0.91, 1
+                        cursor_color: 0.49, 0.23, 0.93, 1
+                        padding: [dp(12), dp(10)]
+                        font_size: "12sp"
+
+                # ScreenScraper
+                BoxLayout:
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: dp(130)
+                    spacing: dp(8)
+                    padding: [dp(16), dp(14)]
+                    canvas.before:
+                        Color:
+                            rgba: 0.094, 0.094, 0.125, 1
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(12)]
+                    Label:
+                        text: "ScreenScraper"
+                        font_size: "14sp"
+                        bold: True
+                        color: 0.49, 0.23, 0.93, 1
+                        size_hint_y: None
+                        height: dp(24)
+                        halign: "left"
+                    TextInput:
+                        id: set_ss_id
+                        hint_text: "Dev ID"
+                        size_hint_y: None
+                        height: dp(42)
+                        multiline: False
+                        background_color: 0.125, 0.125, 0.157, 1
+                        foreground_color: 0.91, 0.91, 0.91, 1
+                        cursor_color: 0.49, 0.23, 0.93, 1
+                        padding: [dp(12), dp(10)]
+                        font_size: "12sp"
+                    TextInput:
+                        id: set_ss_pw
+                        hint_text: "Dev Password"
+                        password: True
+                        size_hint_y: None
+                        height: dp(42)
+                        multiline: False
+                        background_color: 0.125, 0.125, 0.157, 1
+                        foreground_color: 0.91, 0.91, 0.91, 1
+                        cursor_color: 0.49, 0.23, 0.93, 1
+                        padding: [dp(12), dp(10)]
+                        font_size: "12sp"
+
+
+# ---- ScrapeScreen ----
+<ScrapeScreen>:
+    BoxLayout:
+        orientation: "vertical"
+        padding: [0, dp(30), 0, dp(16)]
+        canvas.before:
+            Color:
+                rgba: 0.063, 0.063, 0.090, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        BoxLayout:
+            size_hint_y: None
+            height: dp(50)
+            padding: [dp(20), dp(4)]
+            Button:
+                text: "< 返回"
+                size_hint_x: 0.25
+                background_normal: ""
+                background_color: [0,0,0,0]
+                color: 0.49, 0.23, 0.93, 1
+                font_size: "13sp"
+                on_release: app.root.current = "home"
+            Label:
+                id: rom_count
+                text: ""
+                font_size: "14sp"
+                color: 0.55, 0.55, 0.60, 1
+                halign: "right"
+                valign: "middle"
+                size_hint_x: 0.75
+        ScrollView:
+            do_scroll_x: False
+            GridLayout:
+                id: rom_list
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(1)
+                padding: [dp(16), dp(4)]
+        ProgressBar:
+            id: progress
+            max: 100
+            value: 0
+            size_hint_y: None
+            height: dp(3)
+        Label:
+            id: status_label
+            text: "就绪"
+            font_size: "12sp"
+            color: 0.55, 0.55, 0.60, 1
+            size_hint_y: None
+            height: dp(22)
+            halign: "center"
+        ScrollView:
+            do_scroll_x: False
+            size_hint_y: 0.3
+            Label:
+                id: log_label
+                text: ""
+                size_hint_y: None
+                height: self.texture_size[1] if self.texture_size else dp(20)
+                text_size: self.width - dp(20), None
+                font_size: "11sp"
+                color: 0.55, 0.55, 0.60, 1
+                padding: [dp(12), dp(6)]
+        Button:
+            id: start_btn
+            text: "开始刮削"
+            size_hint_y: None
+            height: dp(50)
+            background_normal: ""
+            background_color: 0.49, 0.23, 0.93, 1
+            color: 0.91, 0.91, 0.91, 1
+            font_size: "15sp"
+            bold: True
+            on_release: root.start_scrape()

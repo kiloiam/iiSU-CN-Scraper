@@ -1,0 +1,28 @@
+{
+  "llm_config": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "sk-your-api-key-here",
+    "model_name": "gpt-4o-mini",
+    "temperature": 0.1,
+    "max_tokens": 200
+  },
+  "ss_config": {
+    "devid": "your-dev-id",
+    "devpassword": "your-dev-password",
+    "softname": "iiSU-CN-Scraper",
+    "base_url": "https://api.screenscraper.fr/api2",
+    "request_delay": 1.5
+  },
+  "path_config": {
+    "roms_directory": "./roms",
+    "media_dir": "downloaded_media",
+    "covers_dir": "covers",
+    "marquees_dir": "marquees"
+  },
+  "scrape_options": {
+    "skip_existing": true,
+    "prefer_chinese": true,
+    "download_covers": true,
+    "download_marquees": true
+  }
+}
