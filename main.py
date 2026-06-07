@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flet as ft
 
-from openai import OpenAI
+from modules.llm_client import LLMClient
 from modules.llm_normalizer import normalize_rom_name
 from modules.bangumi_fetcher import BangumiFetcher
 from modules.tgdb_fetcher import TGDBFetcher
@@ -772,7 +772,7 @@ def main(page: ft.Page):
                 nonlocal start_btn
                 try:
                     add_log("--- LLM 语义清洗 ---")
-                    cl = OpenAI(base_url=state.llm_base_url, api_key=state.llm_api_key)
+                    cl = LLMClient(base_url=state.llm_base_url, api_key=state.llm_api_key)
                     lm = {}
                     for i, p in enumerate(selected):
                         fn = os.path.basename(p)
