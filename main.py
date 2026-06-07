@@ -522,9 +522,6 @@ def main(page: ft.Page):
             visible=False,
         )
 
-        def pick_folder(e):
-            do_detect(e)
-
         def do_detect(e):
             dir_list.controls.clear()
             try:
@@ -639,22 +636,10 @@ def main(page: ft.Page):
                                 ], spacing=8),
                                 ft.Container(height=2, bgcolor="#2a2a3a"),
                                 ft.Container(height=8),
-                                # 操作按钮行
-                                ft.Row([
-                                    ft.Container(
-                                        content=ft.Button("自动检测", on_click=do_detect,
-                                            style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
-                                                                 shape=ft.RoundedRectangleBorder(radius=8))),
-                                        expand=True,
-                                    ),
-                                    ft.Container(width=10),
-                                    ft.Container(
-                                        content=ft.Button("浏览文件夹", on_click=pick_folder,
-                                            style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
-                                                                 shape=ft.RoundedRectangleBorder(radius=8))),
-                                        expand=True,
-                                    ),
-                                ]),
+                                # 操作按钮
+                                ft.Button("自动检测", on_click=do_detect,
+                                    style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
+                                                         shape=ft.RoundedRectangleBorder(radius=8))),
                                 # 手动输入路径
                                 ft.Row([
                                     manual_path,
