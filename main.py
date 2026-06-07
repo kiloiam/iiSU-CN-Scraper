@@ -25,10 +25,8 @@ from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.textinput import TextInput
 
 from modules.llm_client import LLMClient
-from modules.llm_normalizer import normalize_rom_name, translate_desc
+from modules.llm_normalizer import normalize_rom_name
 from modules.ss_fetcher import ScreenScraperFetcher
-from modules.bangumi_fetcher import BangumiFetcher
-from modules.tgdb_fetcher import TGDBFetcher
 from modules.xml_builder import (
     load_existing_gamelist, build_game_element, write_gamelist,
 )
@@ -209,7 +207,6 @@ class SettingsScreen(Screen):
         self.ids.set_llm_model.text = app.llm_model
         self.ids.set_ss_id.text = app.ss_devid
         self.ids.set_ss_pw.text = app.ss_devpw
-        self.ids.set_tgdb_key.text = app.tgdb_api_key
 
     def auto_detect(self):
         self.ids.set_dir_list.clear_widgets()
@@ -243,7 +240,6 @@ class SettingsScreen(Screen):
         app.llm_model = self.ids.set_llm_model.text.strip()
         app.ss_devid = self.ids.set_ss_id.text.strip()
         app.ss_devpw = self.ids.set_ss_pw.text.strip()
-        app.tgdb_api_key = self.ids.set_tgdb_key.text.strip()
 
 
 class ScrapeScreen(Screen):
@@ -307,15 +303,13 @@ class ScrapeScreen(Screen):
                 fn = os.path.basename(p)
                 Clock.schedule_once(lambda _, n=fn, v=pc: self._ui(f"清洗: {n[:40]}", v))
                 try: lm[fn] = normalize_rom_name(cl, app.llm_model, fn)
-                except: lm[fn] = {"standard_zh": "", "standard_en": "", "desc_zh": ""}
+                except: lm[fn] = {"standard_zh": "", "standard_en": ""}
         except Exception as e:
             Clock.schedule_once(lambda _: self._ui(f"LLM 错误: {e}", 0))
             Clock.schedule_once(lambda _: self._reset()); return
 
         Clock.schedule_once(lambda _: self._ui("刮削中...", 30))
-        bgm = BangumiFetcher()
-        ss = ScreenScraperFetcher(app.ss_devid, app.ss_devpw, "iiSU-CN-Scraper") if app.ss_devid else None
-        tgdb = TGDBFetcher(app.tgdb_api_key) if app.tgdb_api_key else None
+        f = ScreenScraperFetcher(app.ss_devid, app.ss_devpw, "iiSU-CN-Scraper")
         gp = Path(app.rom_dir) / "gamelist.xml"
         rt, ex = load_existing_gamelist(gp)
         cd = Path(app.rom_dir) / "downloaded_media" / "covers"
@@ -327,51 +321,24 @@ class ScrapeScreen(Screen):
             Clock.schedule_once(lambda _, n=fn, v=pc: self._ui(n[:50], v))
             if rel in ex:
                 Clock.schedule_once(lambda _, n=fn[:40]: self._log(f"跳过: {n}")); continue
-            ll = lm.get(fn, {"standard_zh": "", "standard_en": "", "desc_zh": ""})
-            # name check handled above
-            zh = ll.get("standard_zh", "")
-            en = ll.get("standard_en", "")
-            if not zh and not en:
+            ll = lm.get(fn, {"standard_zh": "", "standard_en": ""})
+            if not ll["standard_zh"] and not ll["standard_en"]:
                 Clock.schedule_once(lambda _, n=fn[:40]: self._log(f"无名称: {n}")); continue
-            meta = bgm.search_game(zh, en)
-            source = ""
-            if meta and "_error" not in meta:
-                source = "Bangumi"
-            if not meta and ss:
-                meta = ss.search_game(zh, en)
-                if meta and "_error" not in meta:
-                    source = "ScreenScraper"
-            if not meta and tgdb:
-                meta = tgdb.search_game(zh, en)
-                if meta and "_error" not in meta:
-                    source = "TGDB"
+            meta = f.search_game(ll["standard_zh"], ll["standard_en"])
             if not meta:
                 Clock.schedule_once(lambda _, n=fn[:40]: self._log(f"未匹配: {n}")); continue
             sf = _slug(Path(fn).stem)
             cr = ""; mr = ""
-            if source == "ScreenScraper" and ss:
-                if ss.download_cover(meta.get("media_urls", {}), cd / f"{sf}-image.png"):
-                    cr = f"./downloaded_media/covers/{sf}-image.png"
-                if ss.download_marquee(meta.get("media_urls", {}), md / f"{sf}-marquee.png"):
-                    mr = f"./downloaded_media/marquees/{sf}-marquee.png"
-            elif source == "Bangumi":
-                if bgm.download_cover(meta, cd / f"{sf}-image.png"):
-                    cr = f"./downloaded_media/covers/{sf}-image.png"
-            elif source == "TGDB" and tgdb:
-                if tgdb.download_cover(meta, cd / f"{sf}-image.png"):
-                    cr = f"./downloaded_media/covers/{sf}-image.png"
-            desc = meta.get("desc", "")
-            if source == "TGDB" and desc and cl:
-                try:
-                    t = translate_desc(cl, app.llm_model, desc)
-                    if t: desc = t
-                except: pass
+            if f.download_cover(meta["media_urls"], cd / f"{sf}-image.png"):
+                cr = f"./downloaded_media/covers/{sf}-image.png"
+            if f.download_marquee(meta["media_urls"], md / f"{sf}-marquee.png"):
+                mr = f"./downloaded_media/marquees/{sf}-marquee.png"
             entry = {
-                "name": meta.get("name_zh") or ll.get("standard_zh", "") or meta.get("name_en", Path(fn).stem),
-                "desc": desc or "", "image": cr, "marquee": mr,
+                "name": meta.get("name_zh") or meta.get("name_en", Path(fn).stem),
+                "desc": meta.get("desc",""), "image": cr, "marquee": mr,
                 "developer": meta.get("developer",""), "publisher": meta.get("publisher",""),
                 "genre": meta.get("genre",""), "players": meta.get("players",""),
-                "release_date": meta.get("release_date",""), "rating": meta.get("rating",""),
+                "release_date": meta.get("release_date",""), "rating": "",
             }
             ge = build_game_element(rel, entry)
             if rel in ex: rt.remove(ex[rel])
@@ -405,7 +372,6 @@ class IISUApp(App):
     llm_model = "deepseek-chat"
     ss_devid = ""
     ss_devpw = ""
-    tgdb_api_key = ""
     font_name = FONT
 
     def build(self):
@@ -416,6 +382,7 @@ class IISUApp(App):
         sm.add_widget(HomeScreen(name="home"))
         sm.add_widget(SettingsScreen(name="settings"))
         sm.add_widget(ScrapeScreen(name="scrape"))
+        # Kivy auto-loads iisuapp.kv for the IISUApp class; Builder.load_file is extra insurance
         return sm
 
 
