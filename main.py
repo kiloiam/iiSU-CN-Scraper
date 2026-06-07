@@ -522,23 +522,8 @@ def main(page: ft.Page):
             visible=False,
         )
 
-        # 文件夹选择（支持桌面和安卓）
-        def _on_folder_picked(e):
-            if e.path:
-                state.rom_dir = e.path
-                picked_path.value = e.path
-                scrape_from_settings_btn.visible = True
-                selected_box.visible = True
-            else:
-                picked_path.value = "未选择目录"
-            page.update()
-
-        file_picker = ft.FilePicker()
-        file_picker.on_result = _on_folder_picked
-        page.overlay.append(file_picker)
-
         def pick_folder(e):
-            file_picker.get_directory_path("选择 ROM 文件夹")
+            do_detect(e)
 
         def do_detect(e):
             dir_list.controls.clear()
