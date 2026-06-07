@@ -549,8 +549,27 @@ def main(page: ft.Page):
                     )
             page.update()
 
+        manual_path = ft.TextField(
+            hint_text="或手动输入 ROM 目录路径...",
+            value=state.rom_dir,
+            expand=True,
+            bgcolor=SURFACE, color=TEXT,
+            border_color="#2a2a3a", border_radius=8,
+            content_padding=10, dense=True, text_size=12,
+        )
+
+        def _apply_manual(e):
+            p = manual_path.value.strip()
+            if p:
+                state.rom_dir = p
+                picked_path.value = p
+                scrape_from_settings_btn.visible = True
+                selected_box.visible = True
+                page.update()
+
         def _set(path):
             state.rom_dir = path
+            manual_path.value = path
             picked_path.value = path
             scrape_from_settings_btn.visible = True
             selected_box.visible = True
@@ -636,6 +655,15 @@ def main(page: ft.Page):
                                         expand=True,
                                     ),
                                 ]),
+                                # 手动输入路径
+                                ft.Row([
+                                    manual_path,
+                                    ft.Container(width=8),
+                                    ft.Button("使用", on_click=_apply_manual,
+                                        style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
+                                                             shape=ft.RoundedRectangleBorder(radius=8))),
+                                ]),
+                                ft.Container(height=8),
                                 # 检测结果列表
                                 dir_list,
                                 # 选中路径展示 + 刮削按钮
