@@ -20,9 +20,9 @@ jobs:
         run: |
           pip install buildozer cython
 
-      - name: Build APK
+      - name: Build APK (auto-accept licenses)
         run: |
-          buildozer android debug
+          yes | buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
