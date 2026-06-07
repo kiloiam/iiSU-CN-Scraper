@@ -30,6 +30,5 @@ jobs:
         with:
           name: iiSU-CN-Scraper-APK
           path: |
-            build/apk/app-release.apk
-            build/apk/*-release.apk
+            build/apk/*.apk
           if-no-files-found: warn
