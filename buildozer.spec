@@ -13,11 +13,7 @@ android.api = 33
 android.minapi = 26
 android.ndk = 25b
 android.archs = arm64-v8a
-# p4a.branch = develop  # use stable
 p4a.bootstrap = sdl2
-ios.kivy_ios_url = https://github.com/kivy/kivy-ios
-ios.kivy_ios_branch = master
-ios.codesign.allowed = false
 
 [buildozer]
 log_level = 2
