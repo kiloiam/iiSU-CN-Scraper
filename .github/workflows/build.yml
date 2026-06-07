@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [master, main]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -13,24 +13,23 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
-      - name: Install Flet
-        run: pip install flet requests openai
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             git zip unzip openjdk-17-jdk             autoconf libtool pkg-config             zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5             cmake libffi-dev libssl-dev
+
+      - name: Install Buildozer
+        run: |
+          pip install buildozer cython
 
       - name: Build APK
         run: |
-          yes | flet build apk \
-            --project "iiSU CN Scraper" \
-            --org com.iisucn.scraper \
-            --product "iiSU CN Scraper" \
-            --description "Chinese ROM metadata scraper for iiSU frontend"
+          buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: iiSU-CN-Scraper-APK
-          path: |
-            build/apk/app-release.apk
-            build/apk/*-release.apk
-          if-no-files-found: warn
+          path: bin/*.apk

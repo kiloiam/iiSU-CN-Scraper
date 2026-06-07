@@ -4,7 +4,7 @@ import json
 import re
 import time
 from pathlib import Path
-from openai import OpenAI
+from modules.llm_client import LLMClient
 
 SYSTEM_PROMPT = """你是复古游戏专家。从 ROM 文件名提取游戏信息。
 
@@ -39,7 +39,7 @@ RETRY_DELAY = 1.0
 JSON_PATTERN = re.compile(r"\{[^{}]*\"standard_zh\"[^{}]*\"standard_en\"[^{}]*\}", re.DOTALL)
 
 
-def normalize_rom_name(client: OpenAI, model: str, filename: str,
+def normalize_rom_name(client: LLMClient, model: str, filename: str,
                        temperature: float = 0.1, max_tokens: int = 300) -> dict[str, str]:
     """调用 LLM 清洗单个文件名，返回 {standard_zh, standard_en, desc_zh}。"""
     stem = Path(filename).stem
@@ -104,7 +104,7 @@ def _parse_json_response(raw: str, filename: str) -> dict[str, str]:
     raise json.JSONDecodeError(f"无法提取 JSON", raw, 0)
 
 
-def translate_desc(client: OpenAI, model: str, en_desc: str) -> str:
+def translate_desc(client: LLMClient, model: str, en_desc: str) -> str:
     """将英文简介翻译为中文。"""
     if not en_desc or len(en_desc) < 20:
         return ""
@@ -123,10 +123,8 @@ def translate_desc(client: OpenAI, model: str, en_desc: str) -> str:
     except Exception:
         return ""
 
-    raise json.JSONDecodeError(f"无法从回复中提取有效 JSON", raw, 0)
 
-
-def normalize_batch(client: OpenAI, model: str, filenames: list[str],
+def normalize_batch(client: LLMClient, model: str, filenames: list[str],
                     temperature: float = 0.1, max_tokens: int = 200) -> dict[str, dict[str, str]]:
     """批量清洗文件名。返回 {filename: {standard_zh, standard_en}}。"""
     results = {}

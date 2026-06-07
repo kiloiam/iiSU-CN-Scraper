@@ -315,6 +315,41 @@
                         padding: [dp(12), dp(10)]
                         font_size: "12sp"
 
+                # TGDB (免费英文备用)
+                BoxLayout:
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: dp(100)
+                    spacing: dp(8)
+                    padding: [dp(16), dp(14)]
+                    canvas.before:
+                        Color:
+                            rgba: 0.094, 0.094, 0.125, 1
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(12)]
+                    Label:
+                        text: "TGDB (免费英文备用)"
+                        font_size: "14sp"
+                        bold: True
+                        color: 0.49, 0.23, 0.93, 1
+                        size_hint_y: None
+                        height: dp(24)
+                        halign: "left"
+                    TextInput:
+                        id: set_tgdb_key
+                        hint_text: "API Key (可选)"
+                        password: True
+                        size_hint_y: None
+                        height: dp(42)
+                        multiline: False
+                        background_color: 0.125, 0.125, 0.157, 1
+                        foreground_color: 0.91, 0.91, 0.91, 1
+                        cursor_color: 0.49, 0.23, 0.93, 1
+                        padding: [dp(12), dp(10)]
+                        font_size: "12sp"
+
 
 # ---- ScrapeScreen ----
 <ScrapeScreen>:
