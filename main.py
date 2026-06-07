@@ -307,7 +307,7 @@ class ScrapeScreen(Screen):
                 fn = os.path.basename(p)
                 Clock.schedule_once(lambda _, n=fn, v=pc: self._ui(f"清洗: {n[:40]}", v))
                 try: lm[fn] = normalize_rom_name(cl, app.llm_model, fn)
-                except: lm[fn] = {"standard_zh": "", "standard_en": ""}
+                except: lm[fn] = {"standard_zh": "", "standard_en": "", "desc_zh": ""}
         except Exception as e:
             Clock.schedule_once(lambda _: self._ui(f"LLM 错误: {e}", 0))
             Clock.schedule_once(lambda _: self._reset()); return
@@ -328,10 +328,11 @@ class ScrapeScreen(Screen):
             if rel in ex:
                 Clock.schedule_once(lambda _, n=fn[:40]: self._log(f"跳过: {n}")); continue
             ll = lm.get(fn, {"standard_zh": "", "standard_en": "", "desc_zh": ""})
-            if not zh and not en:
-                Clock.schedule_once(lambda _, n=fn[:40]: self._log(f"无名称: {n}")); continue
+            # name check handled above
             zh = ll.get("standard_zh", "")
             en = ll.get("standard_en", "")
+            if not zh and not en:
+                Clock.schedule_once(lambda _, n=fn[:40]: self._log(f"无名称: {n}")); continue
             meta = bgm.search_game(zh, en)
             source = ""
             if meta and "_error" not in meta:
@@ -362,16 +363,15 @@ class ScrapeScreen(Screen):
             desc = meta.get("desc", "")
             if source == "TGDB" and desc and cl:
                 try:
-                    zh_desc = translate_desc(cl, app.llm_model, desc)
-                    if zh_desc: desc = zh_desc
+                    t = translate_desc(cl, app.llm_model, desc)
+                    if t: desc = t
                 except: pass
             entry = {
                 "name": meta.get("name_zh") or ll.get("standard_zh", "") or meta.get("name_en", Path(fn).stem),
                 "desc": desc or "", "image": cr, "marquee": mr,
                 "developer": meta.get("developer",""), "publisher": meta.get("publisher",""),
-                "rating": meta.get("rating",""),
                 "genre": meta.get("genre",""), "players": meta.get("players",""),
-                "release_date": meta.get("release_date",""), "rating": "",
+                "release_date": meta.get("release_date",""), "rating": meta.get("rating",""),
             }
             ge = build_game_element(rel, entry)
             if rel in ex: rt.remove(ex[rel])
@@ -416,7 +416,6 @@ class IISUApp(App):
         sm.add_widget(HomeScreen(name="home"))
         sm.add_widget(SettingsScreen(name="settings"))
         sm.add_widget(ScrapeScreen(name="scrape"))
-        # Kivy auto-loads iisuapp.kv for the IISUApp class; Builder.load_file is extra insurance
         return sm
 
 
