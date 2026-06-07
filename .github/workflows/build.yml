@@ -11,21 +11,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y             git zip unzip openjdk-17-jdk             autoconf libtool pkg-config             zlib1g-dev libncurses-dev             cmake libffi-dev libssl-dev             libltdl-dev
+          sudo apt-get install -y openjdk-17-jdk
+          pip install flet requests
 
-      - name: Install Buildozer and Cython
+      - name: Build APK
         run: |
-          pip install buildozer cython
-
-      - name: Build APK (auto-accept licenses)
-        run: |
-          yes | buildozer android debug
+          yes | flet build apk             --project "iiSU CN Scraper"             --org com.iisucn.scraper             --product "iiSU CN Scraper"             --description "Chinese ROM metadata scraper for iiSU frontend"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: iiSU-CN-Scraper-APK
-          path: bin/*.apk
+          path: |
+            build/apk/app-release.apk
+            build/apk/*-release.apk
+          if-no-files-found: warn
