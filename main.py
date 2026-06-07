@@ -539,6 +539,9 @@ def main(page: ft.Page):
             dir_list.controls.clear()
             try:
                 dirs = detect_dirs()
+            except PermissionError:
+                dirs = []
+                picked_path.value = "无存储权限，请手动输入 ROM 路径"
             except Exception as ex:
                 dirs = []
                 picked_path.value = f"检测出错: {ex}"
@@ -698,7 +701,8 @@ def main(page: ft.Page):
         rom_dirs = state.rom_dirs if state.rom_dirs else [state.rom_dir]
         all_roms = []
         for d in rom_dirs:
-            for fname in scan_roms(d):
+            rom_list, _ = scan_roms(d)
+            for fname in rom_list:
                 all_roms.append((fname, os.path.join(d, fname)))
         total = len(all_roms)
         rom_count = ft.Text(f"{total} ROM ({len(rom_dirs)} 目录)", size=14, color=TEXT)
