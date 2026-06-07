@@ -12,7 +12,6 @@ android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANA
 android.api = 30
 android.minapi = 26
 android.ndk = 25b
-android.gradle_dependencies =
 android.archs = arm64-v8a
 # p4a.branch = develop  # use stable default
 p4a.bootstrap = sdl2
