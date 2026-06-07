@@ -23,7 +23,7 @@ jobs:
 
       - name: Build APK
         run: |
-          yes | flet build apk             --project "iiSU CN Scraper"             --org com.iisucn.scraper             --product "iiSU CN Scraper"             --description "Chinese ROM metadata scraper for iiSU frontend"             --permissions photo_library             --android-permissions android.permission.MANAGE_EXTERNAL_STORAGE=true,android.permission.READ_EXTERNAL_STORAGE=true,android.permission.WRITE_EXTERNAL_STORAGE=true
+          yes | flet build apk             --project "iiSU CN Scraper"             --org com.iisucn.scraper             --product "iiSU CN Scraper"             --description "Chinese ROM metadata scraper for iiSU frontend"             --permissions photo_library microphone
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
