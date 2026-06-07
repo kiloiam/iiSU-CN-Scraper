@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flet as ft
 
-from modules.llm_client import LLMClient
+from openai import OpenAI
 from modules.llm_normalizer import normalize_rom_name
 from modules.bangumi_fetcher import BangumiFetcher
 from modules.tgdb_fetcher import TGDBFetcher
@@ -522,25 +522,23 @@ def main(page: ft.Page):
             visible=False,
         )
 
-        # 文件夹选择
-        def pick_folder(e):
-            try:
-                from tkinter import Tk, filedialog
-                root = Tk()
-                root.withdraw()
-                root.attributes("-topmost", True)
-                path = filedialog.askdirectory(title="选择 ROM 文件夹")
-                root.destroy()
-                if path:
-                    state.rom_dir = path
-                    picked_path.value = path
-                    scrape_from_settings_btn.visible = True
-                    selected_box.visible = True
-                else:
-                    picked_path.value = "未选择目录"
-            except Exception as ex:
-                picked_path.value = f"无法打开: {ex}"
+        # 文件夹选择（支持桌面和安卓）
+        def _on_folder_picked(e):
+            if e.path:
+                state.rom_dir = e.path
+                picked_path.value = e.path
+                scrape_from_settings_btn.visible = True
+                selected_box.visible = True
+            else:
+                picked_path.value = "未选择目录"
             page.update()
+
+        file_picker = ft.FilePicker()
+        file_picker.on_result = _on_folder_picked
+        page.overlay.append(file_picker)
+
+        def pick_folder(e):
+            file_picker.get_directory_path("选择 ROM 文件夹")
 
         def do_detect(e):
             dir_list.controls.clear()
@@ -774,7 +772,7 @@ def main(page: ft.Page):
                 nonlocal start_btn
                 try:
                     add_log("--- LLM 语义清洗 ---")
-                    cl = LLMClient(base_url=state.llm_base_url, api_key=state.llm_api_key)
+                    cl = OpenAI(base_url=state.llm_base_url, api_key=state.llm_api_key)
                     lm = {}
                     for i, p in enumerate(selected):
                         fn = os.path.basename(p)
