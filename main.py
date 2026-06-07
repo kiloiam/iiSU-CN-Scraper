@@ -39,12 +39,25 @@ ROM_ROOTS = [
     "/sdcard/ROMs", "/sdcard/roms",
     "/storage/emulated/0/Emulation/roms",
     "/storage/emulated/0/Games",
-    # 下载目录 (有人直接放这里)
     "/storage/emulated/0/Download",
-    # 外置 SD 卡
+    # 外置 SD 卡 (多种挂载路径)
     "/storage/0000-0000/ROMs", "/storage/0000-0000/roms",
-    # AYN 设备
+    "/mnt/sdcard/ROMs", "/mnt/sdcard/roms",
+    "/external_sd/ROMs", "/external_sd/roms",
+    "/mnt/external_sd/ROMs", "/mnt/external_sd/roms",
+    # 掌机常见路径
     "/storage/emulated/0/RetroArch/roms",
+    "/storage/emulated/0/RetroArch/downloads",
+    "/storage/emulated/0/DraStic/roms",
+    "/storage/emulated/0/PPSSPP/roms",
+    "/storage/emulated/0/DuckStation/roms",
+    "/storage/emulated/0/AetherSX2/roms",
+    "/storage/emulated/0/Dolphin/roms",
+    "/storage/emulated/0/Citra/roms",
+    "/storage/emulated/0/MAME/roms",
+    # 直接放在根目录的 ROM
+    "/storage/emulated/0",
+    "/sdcard",
 ]
 ROM_EXTS = {
     ".gba", ".gbc", ".gb", ".nds", ".3ds", ".n64", ".z64", ".v64",
