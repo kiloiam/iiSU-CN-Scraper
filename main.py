@@ -124,7 +124,7 @@ def _iter_storage_roots() -> list:
     unique = []
     for root in roots:
         real = os.path.realpath(root)
-        if real not in seen and os.path.isdir(root):
+        if real not in seen:
             seen.add(real)
             unique.append(root)
     return unique
@@ -142,15 +142,13 @@ def _scan_parent(parent: str, depth: int = 2) -> list:
     """递归扫描目录树，寻找含 ROM 的目录，最大深度 depth"""
     results = []
     parent = _normalize_android_path(parent)
-    if depth <= 0 or not os.path.isdir(parent):
+    if depth <= 0:
         return results
     try:
         for entry in sorted(os.listdir(parent)):
             if entry in SKIP_DIRS or entry.startswith("."):
                 continue
             full = os.path.join(parent, entry)
-            if not os.path.isdir(full):
-                continue
             n = _count_roms(full)
             if n >= 1:
                 results.append((f"{_sys(entry)}  ({n} ROM)", full))
@@ -167,7 +165,6 @@ def detect_dirs():
     # 1) 预设路径快速扫描
     for root in ROM_ROOTS:
         root = _normalize_android_path(root)
-        if not os.path.isdir(root): continue
         try:
             n = _count_roms(root)
             if n >= 1:
@@ -183,8 +180,10 @@ def detect_dirs():
     # 2) 全盘扫描 — 发现玩家自建目录
     for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
         search_root = _normalize_android_path(search_root)
-        if not os.path.isdir(search_root): continue
-        found.extend(_scan_parent(search_root, depth=2))
+        try:
+            found.extend(_scan_parent(search_root, depth=2))
+        except Exception:
+            pass
 
     # 3) PC 测试 — 扫描项目同级的 test_roms
     for test_root in [
@@ -288,7 +287,24 @@ class AppState:
 state = AppState()
 
 
+def _auto_grant_storage():
+    """Android启动时自动打开存储权限设置页（无需用户按钮）"""
+    try:
+        os.listdir("/storage/emulated/0")
+    except PermissionError:
+        try:
+            import subprocess
+            subprocess.Popen([
+                'am', 'start',
+                '-a', 'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
+                '-d', 'package:com.kiloiam.iisu_cn_scraper'
+            ])
+        except Exception:
+            pass
+
+
 def main(page: ft.Page):
+    _auto_grant_storage()
     page.title = "iiSU CN Scraper"
     page.theme_mode = ft.ThemeMode.DARK
     page.dark_theme = ft.Theme(
@@ -604,7 +620,8 @@ def main(page: ft.Page):
                 os.listdir(path)
                 _set(path)
             except PermissionError:
-                picked_path.value = "无读取权限，请点击「授予存储权限」"
+                picked_path.value = "无读取权限，正在打开系统权限设置..."
+                _auto_grant_storage()
                 page.update()
             except (FileNotFoundError, NotADirectoryError):
                 picked_path.value = "路径不存在，请检查拼写"

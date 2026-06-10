@@ -1,3 +1,7 @@
+[tool.flet]
+org = "com.kiloiam"
+app_name = "iiSU CN Scraper"
+
 [tool.flet.android.permission]
 "android.permission.READ_EXTERNAL_STORAGE" = true
 "android.permission.WRITE_EXTERNAL_STORAGE" = true
