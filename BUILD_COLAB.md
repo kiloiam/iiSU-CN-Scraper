@@ -24,7 +24,7 @@ drive.mount('/content/drive')
 ### 格 3：安装依赖
 ```python
 !pip install flet requests openai
-!flet build apk --project "iiSU CN Scraper" --org com.iisucn.scraper --product "iiSU CN Scraper" --description "Chinese ROM metadata scraper for iiSU frontend"
+!flet build apk --project "iiSU CN Scraper" --org com.iisucn.scraper --product "iiSU CN Scraper" --description "Chinese ROM metadata scraper for iiSU frontend" --android-permissions android.permission.INTERNET=true --android-permissions android.permission.READ_EXTERNAL_STORAGE=true --android-permissions android.permission.WRITE_EXTERNAL_STORAGE=true --android-permissions android.permission.READ_MEDIA_IMAGES=true --android-permissions android.permission.READ_MEDIA_VIDEO=true --android-permissions android.permission.MANAGE_EXTERNAL_STORAGE=true
 ```
 
 ### 格 4：下载 APK

@@ -4,8 +4,9 @@
 Material Design 3 暗色主题，圆形扫描按钮，设置页，刮削页。
 """
 
-import json, os, sys, threading, time
+import json, os, subprocess, sys, threading, time
 from pathlib import Path
+from urllib.parse import unquote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flet as ft
@@ -75,8 +76,59 @@ SKIP_DIRS = {"Android", "DCIM", "Pictures", "Music", "Movies", "Download",
 ROM_SEARCH_ROOTS = [
     "/storage/emulated/0",
     "/sdcard",
-    "/storage/0000-0000",  # 外置 SD
 ]
+
+def _open_all_files_access_settings():
+    if sys.platform in ("win32", "darwin"):
+        return False
+    try:
+        subprocess.run(
+            ["am", "start", "-a", "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION"],
+            timeout=2,
+            check=False,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _normalize_android_path(path: str) -> str:
+    raw = (path or "").strip().strip('"').strip("'")
+    if not raw:
+        return ""
+    if raw.startswith("file://"):
+        raw = unquote(raw[7:])
+    if raw.startswith("/tree/"):
+        raw = raw[6:]
+    if raw.startswith("primary:"):
+        raw = "/storage/emulated/0/" + raw.split(":", 1)[1].lstrip("/")
+    if ":" in raw and not raw.startswith("/"):
+        volume, rest = raw.split(":", 1)
+        raw = f"/storage/{volume}/{rest.lstrip('/')}"
+    return os.path.normpath(raw)
+
+
+def _iter_storage_roots() -> list:
+    roots = ["/storage/emulated/0", "/sdcard"]
+    storage = "/storage"
+    try:
+        for entry in sorted(os.listdir(storage)):
+            if entry in {"self", "emulated"} or entry.startswith("."):
+                continue
+            full = os.path.join(storage, entry)
+            if os.path.isdir(full):
+                roots.append(full)
+    except Exception:
+        pass
+    seen = set()
+    unique = []
+    for root in roots:
+        real = os.path.realpath(root)
+        if real not in seen and os.path.isdir(root):
+            seen.add(real)
+            unique.append(root)
+    return unique
+
 
 def _count_roms(path: str) -> int:
     """统计目录下 ROM 文件数量（仅一级，不递归）"""
@@ -89,6 +141,7 @@ def _count_roms(path: str) -> int:
 def _scan_parent(parent: str, depth: int = 2) -> list:
     """递归扫描目录树，寻找含 ROM 的目录，最大深度 depth"""
     results = []
+    parent = _normalize_android_path(parent)
     if depth <= 0 or not os.path.isdir(parent):
         return results
     try:
@@ -113,6 +166,7 @@ def detect_dirs():
 
     # 1) 预设路径快速扫描
     for root in ROM_ROOTS:
+        root = _normalize_android_path(root)
         if not os.path.isdir(root): continue
         try:
             n = _count_roms(root)
@@ -127,7 +181,8 @@ def detect_dirs():
         except: pass
 
     # 2) 全盘扫描 — 发现玩家自建目录
-    for search_root in ROM_SEARCH_ROOTS:
+    for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
+        search_root = _normalize_android_path(search_root)
         if not os.path.isdir(search_root): continue
         found.extend(_scan_parent(search_root, depth=2))
 
@@ -162,13 +217,16 @@ def detect_dirs():
     return unique
 
 def scan_roms(path):
-    if not os.path.isdir(path): return []
+    path = _normalize_android_path(path)
+    if not path:
+        return []
     try:
         return sorted(
             e for e in os.listdir(path)
             if os.path.isfile(os.path.join(path, e)) and e.lower().endswith(tuple(ROM_EXTS))
         )
-    except: return []
+    except:
+        return []
 
 def _slug(s):
     k = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-"
@@ -178,7 +236,17 @@ def _slug(s):
 # Flet App
 # ======================================================================
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_config.json")
+def _writable_dir():
+    # Flet Android 提供的可写数据目录
+    d = os.environ.get("FLET_APP_STORAGE_DATA", "")
+    if d and os.path.isdir(d):
+        return d
+    home = str(Path.home())
+    if home and home not in ("/", ""):
+        return home
+    return os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(_writable_dir(), "iisusc_config.json")
 
 class AppState:
     """全局状态 + 配置持久化"""
@@ -506,6 +574,11 @@ def main(page: ft.Page):
         tgdb_key = ft.TextField(label="API Key", value=state.tgdb_api_key, **field_style)
         dir_list = ft.Column(spacing=3)
         picked_path = ft.Text("", size=13, color=TEXT)
+        manual_path = ft.TextField(
+            label="手动输入 ROM 路径",
+            hint_text="例如 /storage/emulated/0/ROMs/GBA 或 primary:ROMs/GBA",
+            **field_style,
+        )
         scrape_from_settings_btn = ft.Button("开始刮削此目录",
             style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT, shape=ft.RoundedRectangleBorder(radius=10)),
             visible=False)
@@ -522,7 +595,7 @@ def main(page: ft.Page):
             visible=False,
         )
 
-        # 文件夹选择 (Android: Flet FilePicker / 桌面: tkinter)
+        # 文件夹选择 (桌面: tkinter / 安卓: 聚焦手动输入)
         if sys.platform == "win32" or sys.platform == "darwin":
             # 桌面端：tkinter 系统对话框
             def pick_folder(e):
@@ -534,29 +607,42 @@ def main(page: ft.Page):
                     path = filedialog.askdirectory(title="选择 ROM 文件夹")
                     root.destroy()
                     if path:
-                        state.rom_dir = path
-                        picked_path.value = path
-                        scrape_from_settings_btn.visible = True
-                        selected_box.visible = True
+                        _set(path)
                 except Exception:
                     picked_path.value = "请使用自动检测功能"
                 page.update()
         else:
-            # 安卓端：Flet FilePicker
-            def _on_fp_result(e):
-                if e.path and os.path.isdir(e.path):
-                    state.rom_dir = e.path
-                    picked_path.value = e.path
-                    scrape_from_settings_btn.visible = True
-                    selected_box.visible = True
-                    page.update()
-
-            fp = ft.FilePicker()
-            fp.on_result = _on_fp_result
-            page.overlay.append(fp)
-
+            # 安卓端：Flet FilePicker 不可用，聚焦手动输入框
             def pick_folder(e):
-                page.run_task(fp.get_directory_path, "选择 ROM 文件夹")
+                manual_path.focus()
+                picked_path.value = '请在下方输入 ROM 路径后点击"使用手动路径"'
+                page.update()
+
+        def open_storage_settings(e):
+            if _open_all_files_access_settings():
+                picked_path.value = "请在系统设置中允许管理所有文件后返回"
+            else:
+                picked_path.value = "无法打开系统权限页，请手动授予存储权限"
+            page.update()
+
+        def apply_manual_path(e):
+            path = _normalize_android_path(manual_path.value)
+            if not path:
+                picked_path.value = "请输入路径"
+                page.update()
+                return
+            try:
+                os.listdir(path)
+                _set(path)
+            except PermissionError:
+                picked_path.value = "无读取权限，请点击「授予存储权限」"
+                page.update()
+            except (FileNotFoundError, NotADirectoryError):
+                picked_path.value = "路径不存在，请检查拼写"
+                page.update()
+            except Exception as ex:
+                picked_path.value = f"无法访问: {ex}"
+                page.update()
 
         def do_detect(e):
             dir_list.controls.clear()
@@ -583,7 +669,9 @@ def main(page: ft.Page):
             page.update()
 
         def _set(path):
+            path = _normalize_android_path(path)
             state.rom_dir = path
+            manual_path.value = path
             picked_path.value = path
             scrape_from_settings_btn.visible = True
             selected_box.visible = True
@@ -653,7 +741,6 @@ def main(page: ft.Page):
                                 ], spacing=8),
                                 ft.Container(height=2, bgcolor="#2a2a3a"),
                                 ft.Container(height=8),
-                                # 操作按钮行
                                 ft.Row([
                                     ft.Container(
                                         content=ft.Button("自动检测", on_click=do_detect,
@@ -665,6 +752,22 @@ def main(page: ft.Page):
                                     ft.Container(
                                         content=ft.Button("浏览文件夹", on_click=pick_folder,
                                             style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
+                                                                 shape=ft.RoundedRectangleBorder(radius=8))),
+                                        expand=True,
+                                    ),
+                                ]),
+                                manual_path,
+                                ft.Row([
+                                    ft.Container(
+                                        content=ft.Button("使用手动路径", on_click=apply_manual_path,
+                                            style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
+                                                                 shape=ft.RoundedRectangleBorder(radius=8))),
+                                        expand=True,
+                                    ),
+                                    ft.Container(width=10),
+                                    ft.Container(
+                                        content=ft.Button("授予存储权限", on_click=open_storage_settings,
+                                            style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
                                                                  shape=ft.RoundedRectangleBorder(radius=8))),
                                         expand=True,
                                     ),
