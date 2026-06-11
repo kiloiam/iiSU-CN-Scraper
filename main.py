@@ -78,18 +78,35 @@ ROM_SEARCH_ROOTS = [
     "/sdcard",
 ]
 
+def _am_start(*args):
+    """Try /system/bin/am first, then am (some devices only have one)."""
+    for am in ['/system/bin/am', 'am']:
+        try:
+            subprocess.run([am, 'start'] + list(args), timeout=3, check=False)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def _open_all_files_access_settings():
+    """Open Android 'All files access' settings page (generic, no package targeting)."""
     if sys.platform in ("win32", "darwin"):
         return False
-    try:
-        subprocess.run(
-            ["am", "start", "-a", "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION"],
-            timeout=2,
-            check=False,
-        )
-        return True
-    except Exception:
+    return _am_start('-a', 'android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION')
+
+
+def _open_saf_directory_picker():
+    """Open Storage Access Framework directory picker via Intent.
+
+    Returns True if the intent was sent. The user must select a directory;
+    the resulting URI is received via on_app_lifecycle_state_change / resume.
+    """
+    if sys.platform in ("win32", "darwin"):
         return False
+    # ACTION_OPEN_DOCUMENT_TREE lets user pick a directory and grants persistent URI permission
+    return _am_start('-a', 'android.intent.action.OPEN_DOCUMENT_TREE',
+                     '-c', 'android.intent.category.DEFAULT')
 
 
 def _normalize_android_path(path: str) -> str:
@@ -116,14 +133,20 @@ def _iter_storage_roots() -> list:
             if entry in {"self", "emulated"} or entry.startswith("."):
                 continue
             full = os.path.join(storage, entry)
-            if os.path.isdir(full):
+            if os.path.isdir(full) and os.access(full, os.R_OK):
                 roots.append(full)
+    except PermissionError:
+        pass  # /storage 不可列 = 无外置 SD
     except Exception:
         pass
+    # 去重 (follow symlinks)
     seen = set()
     unique = []
     for root in roots:
-        real = os.path.realpath(root)
+        try:
+            real = os.path.realpath(root)
+        except Exception:
+            real = root
         if real not in seen:
             seen.add(real)
             unique.append(root)
@@ -161,6 +184,7 @@ def _scan_parent(parent: str, depth: int = 2) -> list:
 
 def detect_dirs():
     found = []
+    errors = []
 
     # 1) 预设路径快速扫描
     for root in ROM_ROOTS:
@@ -175,15 +199,22 @@ def detect_dirs():
                 n = _count_roms(full)
                 if n:
                     found.append((f"{_sys(entry)}  ({n} ROM)", full))
-        except: pass
+        except PermissionError:
+            errors.append(f"无权限: {root}")
+        except FileNotFoundError:
+            pass  # 预设路径不存在很正常
+        except Exception as ex:
+            errors.append(f"{root}: {ex}")
 
     # 2) 全盘扫描 — 发现玩家自建目录
     for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
         search_root = _normalize_android_path(search_root)
         try:
             found.extend(_scan_parent(search_root, depth=2))
-        except Exception:
-            pass
+        except PermissionError:
+            errors.append(f"无权限扫描: {search_root}")
+        except Exception as ex:
+            errors.append(f"扫描失败 {search_root}: {ex}")
 
     # 3) PC 测试 — 扫描项目同级的 test_roms
     for test_root in [
@@ -213,7 +244,7 @@ def detect_dirs():
         if path not in seen:
             seen.add(path)
             unique.append((label, path))
-    return unique
+    return unique, errors
 
 def scan_roms(path):
     path = _normalize_android_path(path)
@@ -288,23 +319,39 @@ state = AppState()
 
 
 def _auto_grant_storage():
-    """Android启动时自动打开存储权限设置页（无需用户按钮）"""
+    """Android 启动时检查存储权限，无权限则自动打开系统设置页。
+
+    策略：
+    1. 测试 /storage/emulated/0 是否可读
+    2. 失败时先尝试定向到本 app 的「所有文件访问」设置（Android 12+）
+    3. 若定向 intent 不可用则回退到通用 All files access 页面
+    """
+    if sys.platform in ("win32", "darwin"):
+        return
     try:
         os.listdir("/storage/emulated/0")
+        return  # 已有权限
     except PermissionError:
-        try:
-            import subprocess
-            subprocess.Popen([
-                'am', 'start',
-                '-a', 'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
-                '-d', 'package:com.kiloiam.iisu_cn_scraper'
-            ])
-        except Exception:
-            pass
+        pass
+    except Exception:
+        pass
+    # 尝试打开权限设置
+    if not _am_start('-a', 'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
+                     '-d', 'package:com.kiloiam.iisu_cn_scraper'):
+        _open_all_files_access_settings()
 
+
+_rescan_fn = [None]
 
 def main(page: ft.Page):
     _auto_grant_storage()
+
+    def on_lifecycle(e):
+        """从权限设置页或 SAF 目录选择器返回时自动重扫。"""
+        if e.data in ("resume", "show") and _rescan_fn[0]:
+            page.run_task(_rescan_fn[0], None)
+
+    page.on_app_lifecycle_state_change = on_lifecycle
     page.title = "iiSU CN Scraper"
     page.theme_mode = ft.ThemeMode.DARK
     page.dark_theme = ft.Theme(
@@ -397,6 +444,7 @@ def main(page: ft.Page):
 
         def on_scan(e):
             if scanning["busy"]: return
+            _rescan_fn[0] = on_scan  # 从权限/SAF页面返回时自动重扫
             scanning["busy"] = True
             dir_picker.visible = False
             dir_picker.controls.clear()
@@ -404,7 +452,7 @@ def main(page: ft.Page):
             batch_btn.visible = False
             show_scanning()
             page.update()
-            dirs = detect_dirs()
+            dirs, errors = detect_dirs()
             if dirs:
                 show_found(len(dirs))
                 internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
@@ -424,9 +472,12 @@ def main(page: ft.Page):
                 status_text.visible = False
                 scanning["busy"] = False
             else:
+                if errors:
+                    status_text.value = f"权限不足: {'; '.join(errors[:2])}"
+                    status_text.color = "#ff9f43"
                 show_not_found()
                 page.update()
-                time.sleep(0.6)
+                time.sleep(1.2)  # 给用户看错误信息
                 scanning["busy"] = False
                 go_settings()
             page.update()
@@ -631,15 +682,20 @@ def main(page: ft.Page):
                 page.update()
 
         def do_detect(e):
+            _rescan_fn[0] = do_detect  # 从权限/SAF页面返回时自动重扫
             dir_list.controls.clear()
             try:
-                dirs = detect_dirs()
+                dirs, errors = detect_dirs()
             except Exception as ex:
-                dirs = []
-                picked_path.value = f"检测出错: {ex}"
+                dirs, errors = [], [str(ex)]
+            if errors:
+                for err in errors[:3]:
+                    dir_list.controls.append(
+                        ft.Text(f"⚠ {err}", size=12, color="#ff9f43"))
             if not dirs:
                 dir_list.controls.append(
-                    ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM))
+                    ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
+                    ft.Text("无权限访问存储 → 请点「系统文件选择器」或去系统设置授权", size=13, color="#ff9f43"))
             else:
                 for label, path in dirs:
                     dir_list.controls.append(
@@ -731,8 +787,11 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
                                                          shape=ft.RoundedRectangleBorder(radius=8))),
                                 manual_path,
-                                ft.Button("使用手动路径", on_click=apply_manual_path,
+                                ft.Button("手动输入", on_click=apply_manual_path,
                                     style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
+                                                         shape=ft.RoundedRectangleBorder(radius=8))),
+                                ft.Button("系统文件选择器", on_click=lambda _: _rescan_fn[0](_) if _rescan_fn[0] else _open_saf_directory_picker(),
+                                    style=ft.ButtonStyle(bgcolor=SURFACE, color=TEXT_DIM,
                                                          shape=ft.RoundedRectangleBorder(radius=8))),
                                 # 检测结果列表
                                 dir_list,

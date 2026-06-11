@@ -23,16 +23,13 @@ jobs:
       - name: Build APK
         run: |
           yes | flet build apk \
-            --project "iiSU CN Scraper" \
-            --org com.iisucn.scraper \
-            --product "iiSU CN Scraper" \
-            --description "Chinese ROM metadata scraper for iiSU frontend" \
             --android-permissions android.permission.INTERNET=true \
             --android-permissions android.permission.READ_EXTERNAL_STORAGE=true \
             --android-permissions android.permission.WRITE_EXTERNAL_STORAGE=true \
             --android-permissions android.permission.READ_MEDIA_IMAGES=true \
             --android-permissions android.permission.READ_MEDIA_VIDEO=true \
-            --android-permissions android.permission.MANAGE_EXTERNAL_STORAGE=true
+            --android-permissions android.permission.MANAGE_EXTERNAL_STORAGE=true \
+            --android-permissions android.permission.ACCESS_MEDIA_LOCATION=true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
