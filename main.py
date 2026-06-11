@@ -5,7 +5,6 @@ Material Design 3 暗色主题，圆形扫描按钮，设置页，刮削页。
 """
 
 import json, os, subprocess, sys, threading, time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import unquote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -266,7 +265,7 @@ def _scan_parent(parent: str, depth: int = 2) -> list:
     return results
 
 def _scan_root(root: str, depth: int = 2) -> list:
-    """扫描单个根目录，返回 (label, path) 列表。线程安全（仅读取）。"""
+    """扫描单个根目录，返回 (label, path) 列表。"""
     results = []
     root = _normalize_android_path(root)
     if not os.path.isdir(root):
@@ -287,51 +286,35 @@ def detect_dirs(on_found=None):
     _COUNT_ERRORS = []
     found = []
     errors = []
-
-    # 去重集合（线程间共享）
     seen = set()
-    seen_lock = threading.Lock()
 
-    def _add_results(incoming):
-        with seen_lock:
-            for label, path in incoming:
-                if path not in seen:
-                    seen.add(path)
-                    found.append((label, path))
-                    if on_found:
-                        on_found(label, path)
+    def _add(label, path):
+        if path in seen:
+            return
+        seen.add(path)
+        found.append((label, path))
+        if on_found:
+            on_found(label, path)
 
-    # 1) 预设路径 + PC 测试根：并行扫描
-    all_roots = list(ROM_ROOTS) + [
+    # 1) 预设路径 — 串行扫描（Android 上限速 IO，并行无益）
+    for root in ROM_ROOTS:
+        for label, path in _scan_root(root, 2):
+            _add(label, path)
+
+    # 2) 全盘扫描 — 发现玩家自建目录
+    for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
+        for label, path in _scan_root(search_root, 2):
+            _add(label, path)
+
+    # 3) PC 测试路径
+    for test_root in [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test_roms"),
         "D:\\Agent\\Open-ClaudeCode\\test_roms",
-    ]
-    preset_futures = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for root in all_roots:
-            preset_futures.append(pool.submit(_scan_root, root, 2))
-        # 同时提交全盘扫描
-        search_roots = ROM_SEARCH_ROOTS + _iter_storage_roots()
-        search_futures = []
-        for sr in search_roots:
-            search_futures.append(pool.submit(_scan_root, sr, 2))
-
-        # 收集预设路径结果（这些路径存在概率高，先返回）
-        for fut in as_completed(preset_futures):
-            try:
-                _add_results(fut.result())
-            except Exception:
-                pass
-
-        # 收集全盘扫描结果
-        for fut in as_completed(search_futures):
-            try:
-                _add_results(fut.result())
-            except Exception:
-                pass
+    ]:
+        for label, path in _scan_root(test_root, 2):
+            _add(label, path)
 
     errors.extend(_COUNT_ERRORS)
-    # 此时 found 列表已按不同线程完成顺序排列，去重用 seen 保证唯一
     return found, errors
 
 def scan_roms(path):
@@ -577,46 +560,48 @@ def main(page: ft.Page):
             if scanning["busy"]: return
             _rescan_fn[0] = on_scan  # 从权限/SAF页面返回时自动重扫
             scanning["busy"] = True
-            dir_picker.visible = True
+            dir_picker.visible = False
             dir_picker.controls.clear()
             dir_checks.clear()
             batch_btn.visible = False
             show_scanning()
             page.update()
 
-            # 增量回调：每发现一个目录立即加入 UI
-            def _on_found(label, path):
-                if path not in dir_checks:
-                    dir_picker.controls.append(
-                        _build_dir_card(label, path, _guess_icon(path)))
-                    btn_title.value = f"发现 {len(dir_checks)} 个..."
-                    try:
-                        page.update()
-                    except Exception:
-                        pass
-
             def _scan_thread():
-                dirs, errors = detect_dirs(on_found=_on_found)
+                dirs, errors = detect_dirs()
                 _last_scan_dirs[:] = dirs
                 if dirs:
                     show_found(len(dirs))
+                    internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
+                    external = [(l, p) for l, p in dirs if "/storage/0000-" in p]
+                    def _add_section(title, items):
+                        if not items: return
+                        dir_picker.controls.append(
+                            ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM)
+                        )
+                        for label, path in items:
+                            dir_picker.controls.append(_build_dir_card(label, path, _guess_icon(path)))
+                    _add_section("内部存储", internal)
+                    if external: _add_section("SD 卡", external)
+                    other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
+                    _add_section("其他", other) if other else None
+                    dir_picker.visible = True
                     batch_btn.visible = len(dir_checks) > 0
                     status_text.visible = False
+                    scanning["busy"] = False
                 else:
                     if errors:
                         status_text.value = f"权限不足: {'; '.join(errors[:2])}"
                         status_text.color = "#ff9f43"
                     show_not_found()
-                    page.update()
-                    # 延迟后自动跳转设置页
+                    scanning["busy"] = False
+                page.update()
+                # 未找到目录则延迟跳转设置页
+                if not dirs:
                     def _delayed_go():
-                        scanning["busy"] = False
                         if not _last_scan_dirs:
                             go_settings()
                     threading.Timer(1.2, _delayed_go).start()
-                    return
-                scanning["busy"] = False
-                page.update()
 
             threading.Thread(target=_scan_thread, daemon=True).start()
 
@@ -841,45 +826,41 @@ def main(page: ft.Page):
         def do_detect(e):
             _rescan_fn[0] = do_detect  # 从权限/SAF页面返回时自动重扫
             dir_list.controls.clear()
-            placeholder = ft.Text("检测中...", size=12, color=TEXT_DIM)
-            dir_list.controls.append(placeholder)
+            dir_list.controls.append(
+                ft.Text("检测中...", size=12, color=TEXT_DIM))
             page.update()
-
-            def _on_found(label, path):
-                short = path if len(path) <= 55 else "..." + path[-52:]
-                dir_list.controls.append(
-                    ft.TextButton(
-                        content=ft.Column([
-                            ft.Text(label, size=13, color=TEXT, weight=ft.FontWeight.BOLD),
-                            ft.Text(short, size=10, color=TEXT_DIM),
-                        ], spacing=1, alignment=ft.CrossAxisAlignment.START),
-                        style=ft.ButtonStyle(
-                            bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=8),
-                            padding=ft.Padding(left=10, top=8, right=10, bottom=8),
-                        ),
-                        on_click=lambda e, p=path: _set(p),
-                    )
-                )
-                try: page.update()
-                except: pass
 
             def _scan_thread():
                 try:
-                    dirs, errors = detect_dirs(on_found=_on_found)
+                    dirs, errors = detect_dirs()
                     _last_scan_dirs[:] = dirs
                 except Exception as ex:
                     dirs, errors = [], [str(ex)]
-                # 移除"检测中..."占位
-                if placeholder in dir_list.controls:
-                    dir_list.controls.remove(placeholder)
+                dir_list.controls.clear()
                 if errors:
                     for err in errors[:3]:
-                        dir_list.controls.insert(0,
+                        dir_list.controls.append(
                             ft.Text(f"\u26a0 {err}", size=12, color="#ff9f43"))
                 if not dirs:
                     dir_list.controls.append(
                         ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
                         ft.Text("无存储权限 \u2192 请到系统设置 \u2192 应用 \u2192 iiSU CN Scraper \u2192 所有文件访问权限", size=12, color="#ff9f43"))
+                else:
+                    for label, path in dirs:
+                        short = path if len(path) <= 55 else "..." + path[-52:]
+                        dir_list.controls.append(
+                            ft.TextButton(
+                                content=ft.Column([
+                                    ft.Text(label, size=13, color=TEXT, weight=ft.FontWeight.BOLD),
+                                    ft.Text(short, size=10, color=TEXT_DIM),
+                                ], spacing=1, alignment=ft.CrossAxisAlignment.START),
+                                style=ft.ButtonStyle(
+                                    bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=8),
+                                    padding=ft.Padding(left=10, top=8, right=10, bottom=8),
+                                ),
+                                on_click=lambda e, p=path: _set(p),
+                            )
+                        )
                 page.update()
 
             threading.Thread(target=_scan_thread, daemon=True).start()
