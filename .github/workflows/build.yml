@@ -31,11 +31,16 @@ jobs:
             --android-permissions android.permission.MANAGE_EXTERNAL_STORAGE=true \
             --android-permissions android.permission.ACCESS_MEDIA_LOCATION=true
 
+      - name: List build output
+        run: |
+          find build/ -name "*.apk" -o -name "*.aab" 2>/dev/null || echo "No APK/AAB found"
+          ls -la build/apk/ 2>/dev/null || echo "build/apk/ not found"
+          ls -la build/ 2>/dev/null || echo "build/ not found"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: iiSU-CN-Scraper-APK
-          path: |
-            build/apk/app-release.apk
-            build/apk/*-release.apk
-          if-no-files-found: warn
+          path: build/apk/**/*.apk
+          if-no-files-found: error
+          overwrite: true
