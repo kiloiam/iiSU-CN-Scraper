@@ -222,6 +222,10 @@ def _count_roms(path: str) -> int:
     except PermissionError:
         _COUNT_ERRORS.append(f"无权限: {path}")
         return 0
+    except FileNotFoundError:
+        return 0  # 预设路径不存在很正常，不报错
+    except NotADirectoryError:
+        return 0
     except Exception as ex:
         _COUNT_ERRORS.append(f"{path}: {ex}")
         return 0
@@ -247,6 +251,8 @@ def _scan_parent(parent: str, depth: int = 3) -> list:
                 results.extend(_scan_parent(full, depth - 1))
     except PermissionError:
         _COUNT_ERRORS.append(f"无权限扫描: {parent}")
+    except FileNotFoundError:
+        pass  # 路径不存在是正常的（如 SD 卡未挂载）
     return results
 
 def detect_dirs():
@@ -775,17 +781,21 @@ def main(page: ft.Page):
             if not dirs:
                 dir_list.controls.append(
                     ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
-                    ft.Text("无权限访问存储 → 请点「系统文件选择器」或去系统设置授权", size=13, color="#ff9f43"))
+                    ft.Text("无权限访问存储 → 请点上方「需授权？」按钮", size=13, color="#ff9f43"))
             else:
                 for label, path in dirs:
+                    short = path if len(path) <= 55 else "..." + path[-52:]
                     dir_list.controls.append(
-                        ft.Container(
+                        ft.TextButton(
                             content=ft.Column([
                                 ft.Text(label, size=13, color=TEXT, weight=ft.FontWeight.BOLD),
-                                ft.Text(path, size=10, color=TEXT_DIM),
-                            ], spacing=1),
-                            bgcolor=SURFACE, border_radius=8, padding=10,
-                            on_click=lambda _, p=path: _set(p),
+                                ft.Text(short, size=10, color=TEXT_DIM),
+                            ], spacing=1, alignment=ft.CrossAxisAlignment.START),
+                            style=ft.ButtonStyle(
+                                bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding(left=10, top=8, right=10, bottom=8),
+                            ),
+                            on_click=lambda e, p=path: _set(p),
                         )
                     )
             page.update()
@@ -863,16 +873,15 @@ def main(page: ft.Page):
                                 ], spacing=8),
                                 ft.Container(height=2, bgcolor="#2a2a3a"),
                                 ft.Container(height=8),
-                                ft.Button("自动检测", on_click=do_detect,
-                                    style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
-                                                         shape=ft.RoundedRectangleBorder(radius=8))),
-                                ft.Button("授权存储权限", on_click=lambda _: (_open_all_files_access(), do_detect(None)),
-                                    style=ft.ButtonStyle(bgcolor="#ff9f43", color="#0b0b16",
-                                                         shape=ft.RoundedRectangleBorder(radius=8))),
-                                ft.Text("华为/荣耀设备请到 设置→应用→iiSU CN Scraper→权限→所有文件访问权限 手动开启",
-                                        size=10, color=TEXT_DIM),
+                                ft.Row([
+                                    ft.Button("自动检测", on_click=do_detect,
+                                        style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
+                                                             shape=ft.RoundedRectangleBorder(radius=8))),
+                                    ft.TextButton("需授权？", on_click=lambda _: (_open_all_files_access(), do_detect(None)),
+                                        style=ft.ButtonStyle(color=TEXT_DIM)),
+                                ], spacing=8),
                                 manual_path,
-                                ft.Button("手动输入", on_click=apply_manual_path,
+                                ft.Button("确认路径", on_click=apply_manual_path,
                                     style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
                                                          shape=ft.RoundedRectangleBorder(radius=8))),
                                 # 检测结果列表
@@ -940,8 +949,11 @@ def main(page: ft.Page):
             card = ft.Container(
                 content=ft.Row([
                     ft.Icon(ft.Icons.VIDEOGAME_ASSET, color=TEXT_DIM, size=18),
-                    ft.Text(fname[:55], size=13, color=TEXT),
-                    ft.Container(expand=True),
+                    ft.Text(
+                        fname, size=13, color=TEXT,
+                        max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+                        expand=True,
+                    ),
                     cb,
                 ], spacing=10, alignment=ft.MainAxisAlignment.START),
                 bgcolor=SURFACE, border_radius=10, padding=ft.Padding(left=14, top=10, right=8, bottom=10),
