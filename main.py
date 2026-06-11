@@ -144,26 +144,10 @@ def _open_all_files_access(vendor: str = ""):
 
 
 def _auto_grant_storage():
-    """Android 启动时检查存储权限，无权限则自动打开系统设置页。
-
-    策略：
-    1. 测试 /storage/emulated/0 是否可读
-    2. 失败时打开「所有文件访问」权限页面（多 intent 回退）
-    3. 最后回退到 app 详情页供用户手动授权
-    """
+    """Android 手动触发：打开「所有文件访问」权限页面（多 intent 回退）。"""
     if sys.platform in ("win32", "darwin"):
         return
-    vendor = _detect_device_vendor()
-    for test_path in ["/storage/emulated/0", "/sdcard"]:
-        try:
-            os.listdir(test_path)
-            return  # 已有权限
-        except PermissionError:
-            continue
-        except Exception:
-            continue
-    # 无权限 → 打开设置
-    _open_all_files_access(vendor)
+    _open_all_files_access()
 
 
 def _normalize_android_path(path: str) -> str:
@@ -428,6 +412,19 @@ def _check_storage_permission_on_startup(page: ft.Page):
 
 _rescan_fn = [None]
 
+_last_scan_dirs = []  # 缓存上次扫描结果，供后台重扫对比
+
+def _background_rescan_home():
+    """后台线程：轻量重扫，仅结果变化时才触发 UI 刷新。"""
+    try:
+        dirs, _ = detect_dirs()
+        new_paths = {p for _, p in dirs}
+        old_paths = {p for _, p in _last_scan_dirs}
+        if new_paths != old_paths and new_paths:
+            _last_scan_dirs[:] = dirs
+    except Exception:
+        pass
+
 def main(page: ft.Page):
     # 启动即检查存储权限，无权限弹窗引导
     _check_storage_permission_on_startup(page)
@@ -472,6 +469,9 @@ def main(page: ft.Page):
         if len(page.views) > 1:
             page.views.pop()
             page.update()
+        # 回到首页时后台轻量重扫（不阻塞 UI）
+        if page.views and page.views[-1].route == "/":
+            threading.Thread(target=_background_rescan_home, daemon=True).start()
 
     # ================================================================
     # 首页
@@ -542,6 +542,7 @@ def main(page: ft.Page):
             show_scanning()
             page.update()
             dirs, errors = detect_dirs()
+            _last_scan_dirs[:] = dirs  # 缓存供后台重扫对比
             if dirs:
                 show_found(len(dirs))
                 internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
@@ -776,6 +777,7 @@ def main(page: ft.Page):
             dir_list.controls.clear()
             try:
                 dirs, errors = detect_dirs()
+                _last_scan_dirs[:] = dirs
             except Exception as ex:
                 dirs, errors = [], [str(ex)]
             if errors:

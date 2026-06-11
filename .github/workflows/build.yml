@@ -23,6 +23,7 @@ jobs:
       - name: Build APK
         run: |
           yes | flet build apk \
+            --android-architectures arm64-v8a \
             --android-permissions android.permission.INTERNET=true \
             --android-permissions android.permission.READ_EXTERNAL_STORAGE=true \
             --android-permissions android.permission.WRITE_EXTERNAL_STORAGE=true \
