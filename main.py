@@ -86,7 +86,7 @@ def _detect_device_vendor() -> str:
     """Detect device manufacturer for vendor-specific permission intents."""
     for prop in ['ro.product.manufacturer', 'ro.product.brand']:
         try:
-            result = subprocess.run(['getprop', prop], capture_output=True, text=True, timeout=2)
+            result = subprocess.run(['getprop', prop], capture_output=True, text=True, timeout=1)
             v = result.stdout.strip().lower()
             if v:
                 return v
@@ -164,6 +164,9 @@ def _auto_grant_storage():
             continue
     # 无权限 → 打开设置
     _open_all_files_access(vendor)
+
+
+def _normalize_android_path(path: str) -> str:
     raw = (path or "").strip().strip('"').strip("'")
     if not raw:
         return ""
@@ -207,16 +210,24 @@ def _iter_storage_roots() -> list:
     return unique
 
 
+_COUNT_ERRORS = []  # 全局，供 UI 展示
+
 def _count_roms(path: str) -> int:
     """统计目录下 ROM 文件数量（仅一级，不递归）"""
     try:
-        return sum(1 for f in os.listdir(path)
-                   if os.path.isfile(os.path.join(path, f))
-                   and f.lower().endswith(tuple(ROM_EXTS)))
-    except: return 0
+        n = sum(1 for f in os.listdir(path)
+                if os.path.isfile(os.path.join(path, f))
+                and f.lower().endswith(tuple(ROM_EXTS)))
+        return n
+    except PermissionError:
+        _COUNT_ERRORS.append(f"无权限: {path}")
+        return 0
+    except Exception as ex:
+        _COUNT_ERRORS.append(f"{path}: {ex}")
+        return 0
 
-def _scan_parent(parent: str, depth: int = 2) -> list:
-    """递归扫描目录树，寻找含 ROM 的目录，最大深度 depth"""
+def _scan_parent(parent: str, depth: int = 3) -> list:
+    """递归扫描目录树，寻找含 ROM 的目录，最大深度 depth（默认 3 层）"""
     results = []
     parent = _normalize_android_path(parent)
     if depth <= 0:
@@ -226,33 +237,33 @@ def _scan_parent(parent: str, depth: int = 2) -> list:
             if entry in SKIP_DIRS or entry.startswith("."):
                 continue
             full = os.path.join(parent, entry)
+            if not os.path.isdir(full):
+                continue
             n = _count_roms(full)
             if n >= 1:
                 results.append((f"{_sys(entry)}  ({n} ROM)", full))
-            elif depth > 1:
-                # 深入一层（如 /sdcard/Games/GBA/）
+            if depth > 1:
+                # 继续深入（如 /sdcard/retroarch/roms/GBA/）
                 results.extend(_scan_parent(full, depth - 1))
     except PermissionError:
-        pass
+        _COUNT_ERRORS.append(f"无权限扫描: {parent}")
     return results
 
 def detect_dirs():
+    global _COUNT_ERRORS
+    _COUNT_ERRORS = []
     found = []
     errors = []
 
-    # 1) 预设路径快速扫描
+    # 1) 预设路径 — 快速扫描 + 深入 2 层子目录
     for root in ROM_ROOTS:
         root = _normalize_android_path(root)
         try:
             n = _count_roms(root)
             if n >= 1:
                 found.append((f"{_sys(os.path.basename(root))}  ({n} ROM)", root))
-            for entry in sorted(os.listdir(root)):
-                full = os.path.join(root, entry)
-                if not os.path.isdir(full) or entry in SKIP_DIRS: continue
-                n = _count_roms(full)
-                if n:
-                    found.append((f"{_sys(entry)}  ({n} ROM)", full))
+            # 对每个预设路径也做递归扫描，以支持 ROMs/GBA/ 和 ROMs/NDS/ 等结构
+            found.extend(_scan_parent(root, depth=2))
         except PermissionError:
             errors.append(f"无权限: {root}")
         except FileNotFoundError:
@@ -260,11 +271,11 @@ def detect_dirs():
         except Exception as ex:
             errors.append(f"{root}: {ex}")
 
-    # 2) 全盘扫描 — 发现玩家自建目录
+    # 2) 全盘扫描 — 发现玩家自建目录（3 层深度，覆盖 retroarch/roms/NES 之类）
     for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
         search_root = _normalize_android_path(search_root)
         try:
-            found.extend(_scan_parent(search_root, depth=2))
+            found.extend(_scan_parent(search_root, depth=3))
         except PermissionError:
             errors.append(f"无权限扫描: {search_root}")
         except Exception as ex:
@@ -278,18 +289,14 @@ def detect_dirs():
         test_root = os.path.normpath(test_root)
         if not os.path.isdir(test_root): continue
         try:
-            # 检查根目录本身
             n = _count_roms(test_root)
             if n:
                 found.append((f"{os.path.basename(test_root)}  ({n} ROM)", test_root))
-            # 检查子目录
-            for entry in sorted(os.listdir(test_root)):
-                full = os.path.join(test_root, entry)
-                if os.path.isdir(full):
-                    n = _count_roms(full)
-                    if n:
-                        found.append((f"{_sys(entry)}  ({n} ROM)", full))
+            found.extend(_scan_parent(test_root, depth=2))
         except: pass
+
+    # 汇入 _COUNT_ERRORS
+    errors.extend(_COUNT_ERRORS)
 
     # 去重
     seen = set()
@@ -372,33 +379,52 @@ class AppState:
 state = AppState()
 
 
-def _auto_grant_storage():
-    """Android 启动时检查存储权限，无权限则自动打开系统设置页。
-
-    策略：
-    1. 测试 /storage/emulated/0 是否可读
-    2. 失败时先尝试定向到本 app 的「所有文件访问」设置（Android 12+）
-    3. 若定向 intent 不可用则回退到通用 All files access 页面
-    """
+def _has_storage_permission() -> bool:
+    """Test if storage is readable."""
     if sys.platform in ("win32", "darwin"):
+        return True
+    for p in ["/storage/emulated/0", "/sdcard"]:
+        try:
+            os.listdir(p)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _check_storage_permission_on_startup(page: ft.Page):
+    """启动时检测存储权限，无权限则弹窗引导用户去系统设置开启。"""
+    if _has_storage_permission():
         return
-    try:
-        os.listdir("/storage/emulated/0")
-        return  # 已有权限
-    except PermissionError:
-        pass
-    except Exception:
-        pass
-    # 尝试打开权限设置
-    if not _am_start('-a', 'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION',
-                     '-d', 'package:com.kiloiam.iisu_cn_scraper'):
-        _open_all_files_access_settings()
+
+    def open_settings(e):
+        page.close(dlg)
+        _open_all_files_access()
+        # 注册回扫：用户从设置返回后自动重扫
+        if _rescan_fn[0]:
+            _rescan_fn[0](None)
+
+    dlg = ft.AlertDialog(
+        title=ft.Text("需要存储权限", color=TEXT),
+        content=ft.Text(
+            "检测 ROM 和写入 gamelist.xml 需要「所有文件访问」权限。\n\n"
+            "点击「去设置」→ 找到 iiSU CN Scraper → 开启允许管理所有文件 → 返回即可。",
+            color=TEXT_DIM, size=13,
+        ),
+        actions=[
+            ft.TextButton("稍后", on_click=lambda e: page.close(dlg), style=ft.ButtonStyle(color=TEXT_DIM)),
+            ft.TextButton("去设置", on_click=open_settings, style=ft.ButtonStyle(color=ACCENT)),
+        ],
+        bgcolor=SURFACE,
+    )
+    page.open(dlg)
 
 
 _rescan_fn = [None]
 
 def main(page: ft.Page):
-    _auto_grant_storage()
+    # 启动即检查存储权限，无权限弹窗引导
+    _check_storage_permission_on_startup(page)
 
     def on_lifecycle(e):
         """从权限设置页或 SAF 目录选择器返回时自动重扫。"""
