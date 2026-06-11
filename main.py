@@ -5,6 +5,7 @@ Material Design 3 暗色主题，圆形扫描按钮，设置页，刮削页。
 """
 
 import json, os, subprocess, sys, threading, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import unquote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -75,7 +76,12 @@ def _sys(dirname):
 SKIP_DIRS = {"Android", "DCIM", "Pictures", "Music", "Movies", "Download",
              "Documents", "Alarms", "Audiobooks", "Notifications", "Podcasts",
              "Ringtones", "LOST.DIR", "data", "obb", "cache", "temp",
-             ".thumbnails", ".Trash", "Pendownload", "Tencent", "backups"}
+             ".thumbnails", ".Trash", "Pendownload", "Tencent", "backups",
+             "Recordings", "SpeedSoftware", "TitaniumBackup", "MIUI",
+             "ColorOS", "Snapdrop", "Edit", "Fonts", "Notifications",
+             "Sounds", "Ringtones", "Pictures", "Movies", "Podcasts",
+             "Recordings", "tbs", "tp", "talkingdata", "bugly", "umeng"}
+SKIP_PREFIXES = ("com.", "org.", "net.", "io.", "cn.", "de.")
 
 ROM_SEARCH_ROOTS = [
     "/storage/emulated/0",
@@ -196,116 +202,149 @@ def _iter_storage_roots() -> list:
 
 _COUNT_ERRORS = []  # 全局，供 UI 展示
 
+_AMBIGUOUS_EXTS = {".bin", ".cue", ".zip", ".7z"}
+
+def _is_ambiguous_ext(filename: str) -> bool:
+    """歧义扩展名：不一定是 ROM 文件，需结合目录名判断"""
+    return filename.lower().endswith(tuple(_AMBIGUOUS_EXTS))
+
+def _is_rom_dir(path: str) -> bool:
+    """判断目录名是否匹配已知 ROM 平台，用于歧义扩展名过滤"""
+    basename = os.path.basename(path).lower().replace(" ", "").replace("-", "").replace("_", "")
+    return any(k in basename for k in SYSTEMS)
+
 def _count_roms(path: str) -> int:
-    """统计目录下 ROM 文件数量（仅一级，不递归）"""
+    """统计目录下 ROM 文件数量（仅一级，不递归）。使用 scandir 减少 stat 调用。"""
     try:
-        n = sum(1 for f in os.listdir(path)
-                if os.path.isfile(os.path.join(path, f))
-                and f.lower().endswith(tuple(ROM_EXTS)))
-        return n
+        count = 0
+        for entry in os.scandir(path):
+            if not entry.is_file():
+                continue
+            if entry.name.lower().endswith(tuple(ROM_EXTS)):
+                # 对歧义扩展名做额外过滤：目录名不在 SYSTEMS 映射中则跳过
+                if _is_ambiguous_ext(entry.name) and not _is_rom_dir(path):
+                    continue
+                count += 1
+        return count
     except PermissionError:
         _COUNT_ERRORS.append(f"无权限: {path}")
         return 0
     except FileNotFoundError:
-        return 0  # 预设路径不存在很正常，不报错
+        return 0
     except NotADirectoryError:
         return 0
     except Exception as ex:
         _COUNT_ERRORS.append(f"{path}: {ex}")
         return 0
 
-def _scan_parent(parent: str, depth: int = 3) -> list:
-    """递归扫描目录树，寻找含 ROM 的目录，最大深度 depth（默认 3 层）"""
+def _scan_parent(parent: str, depth: int = 2) -> list:
+    """递归扫描目录树，寻找含 ROM 的目录。使用 scandir 减少 stat 调用。"""
     results = []
     parent = _normalize_android_path(parent)
     if depth <= 0:
         return results
     try:
-        for entry in sorted(os.listdir(parent)):
-            if entry in SKIP_DIRS or entry.startswith("."):
-                continue
-            full = os.path.join(parent, entry)
-            if not os.path.isdir(full):
-                continue
-            n = _count_roms(full)
-            if n >= 1:
-                results.append((f"{_sys(entry)}  ({n} ROM)", full))
-            if depth > 1:
-                # 继续深入（如 /sdcard/retroarch/roms/GBA/）
-                results.extend(_scan_parent(full, depth - 1))
+        with os.scandir(parent) as entries:
+            for entry in sorted(entries, key=lambda e: e.name):
+                if entry.name.startswith("."):
+                    continue
+                if not entry.is_dir():
+                    continue
+                if entry.name in SKIP_DIRS or entry.name.startswith(SKIP_PREFIXES):
+                    continue
+                n = _count_roms(entry.path)
+                if n >= 1:
+                    results.append((f"{_sys(entry.name)}  ({n} ROM)", entry.path))
+                if depth > 1:
+                    results.extend(_scan_parent(entry.path, depth - 1))
     except PermissionError:
         _COUNT_ERRORS.append(f"无权限扫描: {parent}")
     except FileNotFoundError:
-        pass  # 路径不存在是正常的（如 SD 卡未挂载）
+        pass
+    except OSError:
+        pass
     return results
 
-def detect_dirs():
+def _scan_root(root: str, depth: int = 2) -> list:
+    """扫描单个根目录，返回 (label, path) 列表。线程安全（仅读取）。"""
+    results = []
+    root = _normalize_android_path(root)
+    if not os.path.isdir(root):
+        return results
+    try:
+        n = _count_roms(root)
+        if n >= 1:
+            results.append((f"{_sys(os.path.basename(root))}  ({n} ROM)", root))
+        results.extend(_scan_parent(root, depth=depth))
+    except (PermissionError, FileNotFoundError, OSError):
+        pass
+    return results
+
+
+def detect_dirs(on_found=None):
+    """检测 ROM 目录。on_found 可选回调用于增量通知 (label, path)。返回 (dirs, errors)。"""
     global _COUNT_ERRORS
     _COUNT_ERRORS = []
     found = []
     errors = []
 
-    # 1) 预设路径 — 快速扫描 + 深入 2 层子目录
-    for root in ROM_ROOTS:
-        root = _normalize_android_path(root)
-        try:
-            n = _count_roms(root)
-            if n >= 1:
-                found.append((f"{_sys(os.path.basename(root))}  ({n} ROM)", root))
-            # 对每个预设路径也做递归扫描，以支持 ROMs/GBA/ 和 ROMs/NDS/ 等结构
-            found.extend(_scan_parent(root, depth=2))
-        except PermissionError:
-            errors.append(f"无权限: {root}")
-        except FileNotFoundError:
-            pass  # 预设路径不存在很正常
-        except Exception as ex:
-            errors.append(f"{root}: {ex}")
+    # 去重集合（线程间共享）
+    seen = set()
+    seen_lock = threading.Lock()
 
-    # 2) 全盘扫描 — 发现玩家自建目录（3 层深度，覆盖 retroarch/roms/NES 之类）
-    for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
-        search_root = _normalize_android_path(search_root)
-        try:
-            found.extend(_scan_parent(search_root, depth=3))
-        except PermissionError:
-            errors.append(f"无权限扫描: {search_root}")
-        except Exception as ex:
-            errors.append(f"扫描失败 {search_root}: {ex}")
+    def _add_results(incoming):
+        with seen_lock:
+            for label, path in incoming:
+                if path not in seen:
+                    seen.add(path)
+                    found.append((label, path))
+                    if on_found:
+                        on_found(label, path)
 
-    # 3) PC 测试 — 扫描项目同级的 test_roms
-    for test_root in [
+    # 1) 预设路径 + PC 测试根：并行扫描
+    all_roots = list(ROM_ROOTS) + [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test_roms"),
         "D:\\Agent\\Open-ClaudeCode\\test_roms",
-    ]:
-        test_root = os.path.normpath(test_root)
-        if not os.path.isdir(test_root): continue
-        try:
-            n = _count_roms(test_root)
-            if n:
-                found.append((f"{os.path.basename(test_root)}  ({n} ROM)", test_root))
-            found.extend(_scan_parent(test_root, depth=2))
-        except: pass
+    ]
+    preset_futures = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for root in all_roots:
+            preset_futures.append(pool.submit(_scan_root, root, 2))
+        # 同时提交全盘扫描
+        search_roots = ROM_SEARCH_ROOTS + _iter_storage_roots()
+        search_futures = []
+        for sr in search_roots:
+            search_futures.append(pool.submit(_scan_root, sr, 2))
 
-    # 汇入 _COUNT_ERRORS
+        # 收集预设路径结果（这些路径存在概率高，先返回）
+        for fut in as_completed(preset_futures):
+            try:
+                _add_results(fut.result())
+            except Exception:
+                pass
+
+        # 收集全盘扫描结果
+        for fut in as_completed(search_futures):
+            try:
+                _add_results(fut.result())
+            except Exception:
+                pass
+
     errors.extend(_COUNT_ERRORS)
-
-    # 去重
-    seen = set()
-    unique = []
-    for label, path in found:
-        if path not in seen:
-            seen.add(path)
-            unique.append((label, path))
-    return unique, errors
+    # 此时 found 列表已按不同线程完成顺序排列，去重用 seen 保证唯一
+    return found, errors
 
 def scan_roms(path):
     path = _normalize_android_path(path)
     if not path:
         return []
     try:
-        return sorted(
-            e for e in os.listdir(path)
-            if os.path.isfile(os.path.join(path, e)) and e.lower().endswith(tuple(ROM_EXTS))
-        )
+        result = []
+        for entry in os.scandir(path):
+            if entry.is_file() and entry.name.lower().endswith(tuple(ROM_EXTS)):
+                result.append(entry.name)
+        result.sort()
+        return result
     except:
         return []
 
@@ -538,46 +577,56 @@ def main(page: ft.Page):
             if scanning["busy"]: return
             _rescan_fn[0] = on_scan  # 从权限/SAF页面返回时自动重扫
             scanning["busy"] = True
-            dir_picker.visible = False
+            dir_picker.visible = True
             dir_picker.controls.clear()
             dir_checks.clear()
             batch_btn.visible = False
             show_scanning()
             page.update()
-            dirs, errors = detect_dirs()
-            _last_scan_dirs[:] = dirs  # 缓存供后台重扫对比
-            if dirs:
-                show_found(len(dirs))
-                internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
-                external = [(l, p) for l, p in dirs if "/storage/0000-" in p]
-                def _add_section(title, items):
-                    if not items: return
+
+            # 增量回调：每发现一个目录立即加入 UI
+            def _on_found(label, path):
+                if path not in dir_checks:
                     dir_picker.controls.append(
-                        ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM)
-                    )
-                    for label, path in items:
-                        dir_picker.controls.append(_build_dir_card(label, path, _guess_icon(path)))
-                _add_section("内部存储" if internal else "", internal)
-                if external: _add_section("SD 卡", external)
-                other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
-                _add_section("其他", other) if other else None
-                dir_picker.visible = True
-                batch_btn.visible = len(dir_checks) > 0
-                status_text.visible = False
+                        _build_dir_card(label, path, _guess_icon(path)))
+                    btn_title.value = f"发现 {len(dir_checks)} 个..."
+                    try:
+                        page.update()
+                    except Exception:
+                        pass
+
+            def _scan_thread():
+                dirs, errors = detect_dirs(on_found=_on_found)
+                _last_scan_dirs[:] = dirs
+                if dirs:
+                    show_found(len(dirs))
+                    batch_btn.visible = len(dir_checks) > 0
+                    status_text.visible = False
+                else:
+                    if errors:
+                        status_text.value = f"权限不足: {'; '.join(errors[:2])}"
+                        status_text.color = "#ff9f43"
+                    show_not_found()
+                    page.update()
+                    # 延迟后自动跳转设置页
+                    def _delayed_go():
+                        scanning["busy"] = False
+                        if not _last_scan_dirs:
+                            go_settings()
+                    threading.Timer(1.2, _delayed_go).start()
+                    return
                 scanning["busy"] = False
-            else:
-                if errors:
-                    status_text.value = f"权限不足: {'; '.join(errors[:2])}"
-                    status_text.color = "#ff9f43"
-                show_not_found()
                 page.update()
-                time.sleep(1.2)  # 给用户看错误信息
-                scanning["busy"] = False
-                go_settings()
-            page.update()
+
+            threading.Thread(target=_scan_thread, daemon=True).start()
 
         def _pick_one(path):
             """单击卡片 → 只刮削这一个目录"""
+            if not os.path.isdir(_normalize_android_path(path)):
+                status_text.value = "目录已失效，请重新扫描"
+                status_text.color = "#ff9f43"
+                page.update()
+                return
             state.rom_dir = path
             state.rom_dirs = [path]
             btn_icon.name = ft.Icons.CHECK_CIRCLE
@@ -587,7 +636,6 @@ def main(page: ft.Page):
             dir_picker.visible = False
             status_text.visible = True
             page.update()
-            time.sleep(0.3)
             go_scrape()
 
         def _pick_batch(e):
@@ -598,16 +646,27 @@ def main(page: ft.Page):
                 status_text.color = "#ff9f43"
                 page.update()
                 return
-            state.rom_dir = selected[0]
-            state.rom_dirs = selected
+            # 过滤掉已失效的目录
+            valid = [p for p in selected if os.path.isdir(_normalize_android_path(p))]
+            invalid = len(selected) - len(valid)
+            if not valid:
+                status_text.value = "所选目录均已失效，请重新扫描"
+                status_text.color = "#ff9f43"
+                page.update()
+                return
+            if invalid:
+                status_text.value = f"已跳过 {invalid} 个失效目录"
+                status_text.color = "#ff9f43"
+                page.update()
+            state.rom_dir = valid[0]
+            state.rom_dirs = valid
             btn_icon.name = ft.Icons.CHECK_CIRCLE
             btn_icon.color = ACCENT
-            btn_title.value = f"{len(selected)} 个目录"
+            btn_title.value = f"{len(valid)} 个目录"
             btn_sub.value = "批量刮削"
             dir_picker.visible = False
             status_text.visible = True
             page.update()
-            time.sleep(0.3)
             go_scrape()
         batch_btn.on_click = _pick_batch
 
@@ -659,10 +718,12 @@ def main(page: ft.Page):
             if scanning["busy"]: return
             circle_body.scale = 0.93
             page.update()
-            time.sleep(0.10)
-            circle_body.scale = 1.0
-            page.update()
-            on_scan(e)
+            # 利用 animate_scale 的动画过渡（200ms），不需要 sleep
+            def _bounce():
+                circle_body.scale = 1.0
+                page.update()
+                on_scan(e)
+            threading.Timer(0.1, _bounce).start()
 
         circle_body = ft.Container(
             width=180, height=180, border_radius=90,
@@ -780,36 +841,48 @@ def main(page: ft.Page):
         def do_detect(e):
             _rescan_fn[0] = do_detect  # 从权限/SAF页面返回时自动重扫
             dir_list.controls.clear()
-            try:
-                dirs, errors = detect_dirs()
-                _last_scan_dirs[:] = dirs
-            except Exception as ex:
-                dirs, errors = [], [str(ex)]
-            if errors:
-                for err in errors[:3]:
-                    dir_list.controls.append(
-                        ft.Text(f"⚠ {err}", size=12, color="#ff9f43"))
-            if not dirs:
-                dir_list.controls.append(
-                    ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
-                    ft.Text("无存储权限 → 请到系统设置 → 应用 → iiSU CN Scraper → 所有文件访问权限", size=12, color="#ff9f43"))
-            else:
-                for label, path in dirs:
-                    short = path if len(path) <= 55 else "..." + path[-52:]
-                    dir_list.controls.append(
-                        ft.TextButton(
-                            content=ft.Column([
-                                ft.Text(label, size=13, color=TEXT, weight=ft.FontWeight.BOLD),
-                                ft.Text(short, size=10, color=TEXT_DIM),
-                            ], spacing=1, alignment=ft.CrossAxisAlignment.START),
-                            style=ft.ButtonStyle(
-                                bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=8),
-                                padding=ft.Padding(left=10, top=8, right=10, bottom=8),
-                            ),
-                            on_click=lambda e, p=path: _set(p),
-                        )
-                    )
+            placeholder = ft.Text("检测中...", size=12, color=TEXT_DIM)
+            dir_list.controls.append(placeholder)
             page.update()
+
+            def _on_found(label, path):
+                short = path if len(path) <= 55 else "..." + path[-52:]
+                dir_list.controls.append(
+                    ft.TextButton(
+                        content=ft.Column([
+                            ft.Text(label, size=13, color=TEXT, weight=ft.FontWeight.BOLD),
+                            ft.Text(short, size=10, color=TEXT_DIM),
+                        ], spacing=1, alignment=ft.CrossAxisAlignment.START),
+                        style=ft.ButtonStyle(
+                            bgcolor=SURFACE, shape=ft.RoundedRectangleBorder(radius=8),
+                            padding=ft.Padding(left=10, top=8, right=10, bottom=8),
+                        ),
+                        on_click=lambda e, p=path: _set(p),
+                    )
+                )
+                try: page.update()
+                except: pass
+
+            def _scan_thread():
+                try:
+                    dirs, errors = detect_dirs(on_found=_on_found)
+                    _last_scan_dirs[:] = dirs
+                except Exception as ex:
+                    dirs, errors = [], [str(ex)]
+                # 移除"检测中..."占位
+                if placeholder in dir_list.controls:
+                    dir_list.controls.remove(placeholder)
+                if errors:
+                    for err in errors[:3]:
+                        dir_list.controls.insert(0,
+                            ft.Text(f"\u26a0 {err}", size=12, color="#ff9f43"))
+                if not dirs:
+                    dir_list.controls.append(
+                        ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
+                        ft.Text("无存储权限 \u2192 请到系统设置 \u2192 应用 \u2192 iiSU CN Scraper \u2192 所有文件访问权限", size=12, color="#ff9f43"))
+                page.update()
+
+            threading.Thread(target=_scan_thread, daemon=True).start()
 
         def _set(path):
             path = _normalize_android_path(path)
@@ -927,21 +1000,37 @@ def main(page: ft.Page):
     # 刮削页
     # ================================================================
     def build_scrape():
-        # 支持批量目录
-        rom_dirs = state.rom_dirs if state.rom_dirs else [state.rom_dir]
+        # 支持批量目录。先校验路径有效性
+        raw_dirs = state.rom_dirs if state.rom_dirs else [state.rom_dir]
+        rom_dirs = []
+        skipped_dirs = 0
+        for d in raw_dirs:
+            d = _normalize_android_path(d)
+            if d and os.path.isdir(d):
+                rom_dirs.append(d)
+            else:
+                skipped_dirs += 1
         all_roms = []
         for d in rom_dirs:
             for fname in scan_roms(d):
                 all_roms.append((fname, os.path.join(d, fname)))
         total = len(all_roms)
-        rom_count = ft.Text(f"{total} ROM ({len(rom_dirs)} 目录)", size=14, color=TEXT)
+        dir_label = f"{len(rom_dirs)} 目录"
+        if skipped_dirs:
+            dir_label += f" (跳过 {skipped_dirs} 无效)"
+        rom_count = ft.Text(f"{total} ROM ({dir_label})", size=14, color=TEXT)
         status = ft.Text("就绪", size=13, color=TEXT_DIM)
         progress = ft.ProgressBar(value=0, color=ACCENT, bgcolor=SURFACE, expand=True)
-        log_lines = ft.Column(spacing=1)  # 每条日志一行，可滚动
+        log_list = ft.ListView(spacing=1, expand=True)
+        log_controls = []  # 保持引用，用于 add_log
 
         def add_log(msg):
-            log_lines.controls.append(ft.Text(msg, size=11, color=TEXT_DIM))
-            page.update()
+            log_controls.append(ft.Text(msg, size=11, color=TEXT_DIM))
+            log_list.controls = log_controls
+            try:
+                page.update()
+            except RuntimeError:
+                pass
         start_btn = ft.Button(
             "开始刮削",
             style=ft.ButtonStyle(
@@ -1007,13 +1096,23 @@ def main(page: ft.Page):
                 padding=ft.Padding(left=24, top=14, right=24, bottom=14),
             )
             progress.value = 0
-            log_lines.controls.clear()
-            status.value = "正在连接..."
+            log_controls.clear()
+            log_list.controls = []
+            status.value = "初始化..."
+            add_log("--- 初始化 API 客户端 ---")
             page.update()
 
             def _update_ui():
-                try: page.update()
-                except RuntimeError: pass
+                try:
+                    page.update()
+                except RuntimeError:
+                    pass  # 页面已关闭
+                except Exception:
+                    # 一次重试
+                    try:
+                        page.update()
+                    except Exception:
+                        pass
 
             def _run():
                 nonlocal start_btn
@@ -1123,11 +1222,20 @@ def main(page: ft.Page):
                         ge = build_game_element(rel, entry)
                         if rel in ex: rt.remove(ex[rel])
                         rt.append(ge); ex[rel] = ge; write_gamelist(gp, rt); ok += 1
+                        # 进度：元数据获取 30%-90%，写入 gamelist 90%-98%
+                        progress.value = 0.30 + 0.68 * (i+1)/len(selected)
 
+                    # 写入 gamelist 阶段
+                    add_log("--- 写入 gamelist.xml ---")
+                    gkeys = list(gamelists.keys())
+                    for j, pdir in enumerate(gkeys):
+                        gp, rt_existing, _ = gamelists[pdir]
+                        progress.value = 0.98 + 0.02 * (j+1)/len(gkeys)
+                        status.value = f"写入 {j+1}/{len(gkeys)}"
+                        _update_ui()
+                        add_log(f"gamelist.xml -> {pdir}")
                     progress.value = 1.0
                     status.value = f"完成 {ok} 个"
-                    for pdir in gamelists:
-                        add_log(f"gamelist.xml -> {pdir}")
                 except Exception as ex:
                     status.value = f"错误: {ex}"
                 finally:
@@ -1186,14 +1294,13 @@ def main(page: ft.Page):
                             padding=ft.Padding(left=16, top=12, right=16, bottom=12),
                             margin=ft.Padding(left=16, top=0, right=16, bottom=0),
                         ),
-                        # 日志区 (可滚动)
+                        # 日志区 (ListView 自动滚动)
                         ft.Container(
                             content=ft.Column([
                                 ft.Text("日志", size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM),
                                 ft.Container(height=4),
-                                ft.Column(
-                                    controls=[log_lines],
-                                    scroll=ft.ScrollMode.AUTO,
+                                ft.Container(
+                                    content=log_list,
                                     expand=True,
                                 ),
                             ]),
