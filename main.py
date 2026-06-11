@@ -462,8 +462,11 @@ def main(page: ft.Page):
         navigate(build_settings())
 
     def go_scrape(e=None):
-        _rescan_fn[0] = None  # 不再自动重扫（避免从刮削页返回时触发延迟检测）
-        navigate(build_scrape())
+        _rescan_fn[0] = None
+        # 先移除旧 scrape 页（如果有），确保 build_scrape 读到最新的 state
+        page.views = [v for v in page.views if v.route != "/scrape"]
+        page.views.append(build_scrape())
+        page.update()
 
     def pop_view(e=None):
         if len(page.views) > 1:
@@ -819,8 +822,12 @@ def main(page: ft.Page):
             if state.rom_dir:
                 state.rom_dirs = [state.rom_dir]
                 save_all()
-                pop_view()
-                go_scrape()
+                # pop 设置页 → 移除旧 scrape 页 → 推入新 scrape 页
+                if len(page.views) > 1:
+                    page.views.pop()
+                page.views = [v for v in page.views if v.route != "/scrape"]
+                page.views.append(build_scrape())
+                page.update()
 
         scrape_from_settings_btn.on_click = go_scrape_from_settings
 
