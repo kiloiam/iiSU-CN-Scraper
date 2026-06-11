@@ -465,6 +465,7 @@ def main(page: ft.Page):
         navigate(build_settings())
 
     def go_scrape(e=None):
+        _rescan_fn[0] = None  # 不再自动重扫（避免从刮削页返回时触发延迟检测）
         navigate(build_scrape())
 
     def pop_view(e=None):
@@ -518,6 +519,8 @@ def main(page: ft.Page):
                     cb,
                 ], spacing=8, alignment=ft.MainAxisAlignment.START),
                 bgcolor=SURFACE, border_radius=12, padding=ft.Padding(left=14, top=10, right=8, bottom=10),
+                ink=True,
+                on_click=lambda e, p=path: _pick_one(p),
             )
 
         def _guess_icon(path: str) -> str:
@@ -555,6 +558,7 @@ def main(page: ft.Page):
                 other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
                 _add_section("其他", other) if other else None
                 dir_picker.visible = True
+                batch_btn.visible = len(dir_checks) > 0
                 status_text.visible = False
                 scanning["busy"] = False
             else:
@@ -781,7 +785,7 @@ def main(page: ft.Page):
             if not dirs:
                 dir_list.controls.append(
                     ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
-                    ft.Text("无权限访问存储 → 请点上方「需授权？」按钮", size=13, color="#ff9f43"))
+                    ft.Text("无存储权限 → 请到系统设置 → 应用 → iiSU CN Scraper → 所有文件访问权限", size=12, color="#ff9f43"))
             else:
                 for label, path in dirs:
                     short = path if len(path) <= 55 else "..." + path[-52:]
@@ -873,13 +877,9 @@ def main(page: ft.Page):
                                 ], spacing=8),
                                 ft.Container(height=2, bgcolor="#2a2a3a"),
                                 ft.Container(height=8),
-                                ft.Row([
-                                    ft.Button("自动检测", on_click=do_detect,
+                                ft.Button("自动检测", on_click=do_detect,
                                         style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
                                                              shape=ft.RoundedRectangleBorder(radius=8))),
-                                    ft.TextButton("需授权？", on_click=lambda _: (_open_all_files_access(), do_detect(None)),
-                                        style=ft.ButtonStyle(color=TEXT_DIM)),
-                                ], spacing=8),
                                 manual_path,
                                 ft.Button("确认路径", on_click=apply_manual_path,
                                     style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
