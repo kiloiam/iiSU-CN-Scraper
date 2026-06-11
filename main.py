@@ -280,8 +280,8 @@ def _scan_root(root: str, depth: int = 2) -> list:
     return results
 
 
-def detect_dirs(on_found=None):
-    """检测 ROM 目录。on_found 可选回调用于增量通知 (label, path)。返回 (dirs, errors)。"""
+def detect_dirs(on_found=None, on_progress=None):
+    """检测 ROM 目录。on_found/on_progress 可选回调用于增量通知。返回 (dirs, errors)。"""
     global _COUNT_ERRORS
     _COUNT_ERRORS = []
     found = []
@@ -296,13 +296,20 @@ def detect_dirs(on_found=None):
         if on_found:
             on_found(label, path)
 
-    # 1) 预设路径 — 串行扫描（Android 上限速 IO，并行无益）
+    def _report(msg):
+        if on_progress:
+            on_progress(msg)
+
+    # 1) 预设路径 — 快速扫描
     for root in ROM_ROOTS:
+        _report(f"扫描 {os.path.basename(root) or root[:20]}...")
         for label, path in _scan_root(root, 2):
             _add(label, path)
 
     # 2) 全盘扫描 — 发现玩家自建目录
     for search_root in ROM_SEARCH_ROOTS + _iter_storage_roots():
+        short = os.path.basename(search_root) or search_root.replace("/storage/", "")[:20]
+        _report(f"扫描 {short}...")
         for label, path in _scan_root(search_root, 2):
             _add(label, path)
 
@@ -567,8 +574,13 @@ def main(page: ft.Page):
             show_scanning()
             page.update()
 
+            def _on_progress(msg):
+                btn_sub.value = msg
+                try: page.update()
+                except: pass
+
             def _scan_thread():
-                dirs, errors = detect_dirs()
+                dirs, errors = detect_dirs(on_progress=_on_progress)
                 _last_scan_dirs[:] = dirs
                 if dirs:
                     show_found(len(dirs))
@@ -826,13 +838,18 @@ def main(page: ft.Page):
         def do_detect(e):
             _rescan_fn[0] = do_detect  # 从权限/SAF页面返回时自动重扫
             dir_list.controls.clear()
-            dir_list.controls.append(
-                ft.Text("检测中...", size=12, color=TEXT_DIM))
+            progress_text = ft.Text("检测中...", size=12, color=TEXT_DIM)
+            dir_list.controls.append(progress_text)
             page.update()
+
+            def _on_progress(msg):
+                progress_text.value = f"检测中 — {msg}"
+                try: page.update()
+                except: pass
 
             def _scan_thread():
                 try:
-                    dirs, errors = detect_dirs()
+                    dirs, errors = detect_dirs(on_progress=_on_progress)
                     _last_scan_dirs[:] = dirs
                 except Exception as ex:
                     dirs, errors = [], [str(ex)]
