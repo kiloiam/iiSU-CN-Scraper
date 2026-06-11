@@ -389,32 +389,36 @@ def main(page: ft.Page):
             batch_btn.visible = False
             show_scanning()
             page.update()
-            dirs = detect_dirs()
-            if dirs:
-                show_found(len(dirs))
-                internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
-                external = [(l, p) for l, p in dirs if "/storage/0000-" in p]
-                def _add_section(title, items):
-                    if not items: return
-                    dir_picker.controls.append(
-                        ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM)
-                    )
-                    for label, path in items:
-                        dir_picker.controls.append(_build_dir_card(label, path, _guess_icon(path)))
-                _add_section("内部存储" if internal else "", internal)
-                if external: _add_section("SD 卡", external)
-                other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
-                _add_section("其他", other) if other else None
-                dir_picker.visible = True
-                status_text.visible = False
-                scanning["busy"] = False
-            else:
-                show_not_found()
+
+            def _detect():
+                dirs = detect_dirs()
+                if dirs:
+                    show_found(len(dirs))
+                    internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
+                    external = [(l, p) for l, p in dirs if "/storage/0000-" in p]
+                    def _add_section(title, items):
+                        if not items: return
+                        dir_picker.controls.append(
+                            ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM)
+                        )
+                        for label, path in items:
+                            dir_picker.controls.append(_build_dir_card(label, path, _guess_icon(path)))
+                    _add_section("内部存储" if internal else "", internal)
+                    if external: _add_section("SD 卡", external)
+                    other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
+                    _add_section("其他", other) if other else None
+                    dir_picker.visible = True
+                    status_text.visible = False
+                    scanning["busy"] = False
+                else:
+                    show_not_found()
+                    page.update()
+                    time.sleep(0.6)
+                    scanning["busy"] = False
+                    go_settings()
                 page.update()
-                time.sleep(0.6)
-                scanning["busy"] = False
-                go_settings()
-            page.update()
+
+            threading.Thread(target=_detect, daemon=True).start()
 
         def _pick_one(path):
             """单击卡片 → 只刮削这一个目录"""
@@ -427,8 +431,7 @@ def main(page: ft.Page):
             dir_picker.visible = False
             status_text.visible = True
             page.update()
-            time.sleep(0.3)
-            go_scrape()
+            threading.Timer(0.3, go_scrape).start()
 
         def _pick_batch(e):
             """批量刮削所有勾选的目录"""
@@ -445,8 +448,7 @@ def main(page: ft.Page):
             dir_picker.visible = False
             status_text.visible = True
             page.update()
-            time.sleep(0.3)
-            go_scrape()
+            threading.Timer(0.3, go_scrape).start()
         batch_btn.on_click = _pick_batch
 
         # 按钮内容（动态更新）
@@ -497,10 +499,12 @@ def main(page: ft.Page):
             if scanning["busy"]: return
             circle_body.scale = 0.93
             page.update()
-            time.sleep(0.10)
-            circle_body.scale = 1.0
-            page.update()
-            on_scan(e)
+            def _anim():
+                time.sleep(0.10)
+                circle_body.scale = 1.0
+                page.update()
+                on_scan(e)
+            threading.Thread(target=_anim, daemon=True).start()
 
         circle_body = ft.Container(
             width=180, height=180, border_radius=90,
@@ -833,7 +837,7 @@ def main(page: ft.Page):
         rom_cards = ft.Column(spacing=6)
         for fname, fpath in all_roms:
             cb = ft.Checkbox(value=True, fill_color=ACCENT)
-            checks[fname] = cb
+            checks[fpath] = cb
             card = ft.Container(
                 content=ft.Row([
                     ft.Icon(ft.Icons.VIDEOGAME_ASSET, color=TEXT_DIM, size=18),
@@ -858,8 +862,7 @@ def main(page: ft.Page):
 
         def do_scrape(e):
             # 从 all_roms 中取完整路径
-            path_map = {fn: fp for fn, fp in all_roms}
-            selected = [path_map[f] for f, cb in checks.items() if cb.value and f in path_map]
+            selected = [fp for fp, cb in checks.items() if cb.value]
             if not selected:
                 status.value = "未选中 ROM"
                 page.update(); return

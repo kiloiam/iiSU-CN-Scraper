@@ -594,7 +594,9 @@ def main(page: ft.Page):
             """批量刮削所有勾选的目录"""
             selected = [p for p, cb in dir_checks.items() if cb.value]
             if not selected:
-                _pick_one(list(dir_checks.keys())[0])  # fallback
+                status_text.value = "请先勾选要刮削的目录"
+                status_text.color = "#ff9f43"
+                page.update()
                 return
             state.rom_dir = selected[0]
             state.rom_dirs = selected
