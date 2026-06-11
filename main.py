@@ -42,10 +42,14 @@ ROM_ROOTS = [
     "/storage/emulated/0/Games",
     # 下载目录 (有人直接放这里)
     "/storage/emulated/0/Download",
-    # 外置 SD 卡
+    # 外置 SD 卡 (标准路径 + 华为/Honor 变体)
     "/storage/0000-0000/ROMs", "/storage/0000-0000/roms",
-    # AYN 设备
+    # AYN / 安卓掌机
     "/storage/emulated/0/RetroArch/roms",
+    # 华为/Honor 设备专用 (文件管理器创建的默认路径)
+    "/storage/emulated/0/Documents/ROMs",
+    "/storage/emulated/0/Documents/roms",
+    "/storage/emulated/0/Documents/Games",
 ]
 ROM_EXTS = {
     ".gba", ".gbc", ".gb", ".nds", ".3ds", ".n64", ".z64", ".v64",
@@ -78,6 +82,19 @@ ROM_SEARCH_ROOTS = [
     "/sdcard",
 ]
 
+def _detect_device_vendor() -> str:
+    """Detect device manufacturer for vendor-specific permission intents."""
+    for prop in ['ro.product.manufacturer', 'ro.product.brand']:
+        try:
+            result = subprocess.run(['getprop', prop], capture_output=True, text=True, timeout=2)
+            v = result.stdout.strip().lower()
+            if v:
+                return v
+        except Exception:
+            continue
+    return "unknown"
+
+
 def _am_start(*args):
     """Try /system/bin/am first, then am (some devices only have one)."""
     for am in ['/system/bin/am', 'am']:
@@ -89,27 +106,64 @@ def _am_start(*args):
     return False
 
 
-def _open_all_files_access_settings():
-    """Open Android 'All files access' settings page (generic, no package targeting)."""
+def _open_app_settings():
+    """Open the app's own system settings page where all permissions can be toggled."""
     if sys.platform in ("win32", "darwin"):
         return False
-    return _am_start('-a', 'android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION')
+    for action in [
+        '-a', 'android.settings.APPLICATION_DETAILS_SETTINGS',
+        '-d', 'package:com.kiloiam.iisu_cn_scraper',
+    ]:
+        pass
+    return _am_start(
+        '-a', 'android.settings.APPLICATION_DETAILS_SETTINGS',
+        '-d', 'package:com.kiloiam.iisu_cn_scraper',
+    )
 
 
-def _open_saf_directory_picker():
-    """Open Storage Access Framework directory picker via Intent.
+def _open_all_files_access(vendor: str = ""):
+    """Open the All Files Access permission page using the most compatible intent.
 
-    Returns True if the intent was sent. The user must select a directory;
-    the resulting URI is received via on_app_lifecycle_state_change / resume.
+    Tries multiple intent actions in order of specificity, falling back to
+    the generic page that works on all Android 11+ devices.
     """
     if sys.platform in ("win32", "darwin"):
         return False
-    # ACTION_OPEN_DOCUMENT_TREE lets user pick a directory and grants persistent URI permission
-    return _am_start('-a', 'android.intent.action.OPEN_DOCUMENT_TREE',
-                     '-c', 'android.intent.category.DEFAULT')
+    pkg = 'package:com.kiloiam.iisu_cn_scraper'
+
+    # 1) Directed intent (Android 12+, may work on stock Android)
+    if _am_start('-a', 'android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION', '-d', pkg):
+        return True
+
+    # 2) Generic all-files-access page (all Android 11+)
+    if _am_start('-a', 'android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION'):
+        return True
+
+    # 3) Last resort: open app details page so user can find the toggle manually
+    return _open_app_settings()
 
 
-def _normalize_android_path(path: str) -> str:
+def _auto_grant_storage():
+    """Android 启动时检查存储权限，无权限则自动打开系统设置页。
+
+    策略：
+    1. 测试 /storage/emulated/0 是否可读
+    2. 失败时打开「所有文件访问」权限页面（多 intent 回退）
+    3. 最后回退到 app 详情页供用户手动授权
+    """
+    if sys.platform in ("win32", "darwin"):
+        return
+    vendor = _detect_device_vendor()
+    for test_path in ["/storage/emulated/0", "/sdcard"]:
+        try:
+            os.listdir(test_path)
+            return  # 已有权限
+        except PermissionError:
+            continue
+        except Exception:
+            continue
+    # 无权限 → 打开设置
+    _open_all_files_access(vendor)
     raw = (path or "").strip().strip('"').strip("'")
     if not raw:
         return ""
@@ -786,12 +840,14 @@ def main(page: ft.Page):
                                 ft.Button("自动检测", on_click=do_detect,
                                     style=ft.ButtonStyle(bgcolor=SURFACE, color=ACCENT,
                                                          shape=ft.RoundedRectangleBorder(radius=8))),
+                                ft.Button("授权存储权限", on_click=lambda _: (_open_all_files_access(), do_detect(None)),
+                                    style=ft.ButtonStyle(bgcolor="#ff9f43", color="#0b0b16",
+                                                         shape=ft.RoundedRectangleBorder(radius=8))),
+                                ft.Text("华为/荣耀设备请到 设置→应用→iiSU CN Scraper→权限→所有文件访问权限 手动开启",
+                                        size=10, color=TEXT_DIM),
                                 manual_path,
                                 ft.Button("手动输入", on_click=apply_manual_path,
                                     style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT,
-                                                         shape=ft.RoundedRectangleBorder(radius=8))),
-                                ft.Button("系统文件选择器", on_click=lambda _: _rescan_fn[0](_) if _rescan_fn[0] else _open_saf_directory_picker(),
-                                    style=ft.ButtonStyle(bgcolor=SURFACE, color=TEXT_DIM,
                                                          shape=ft.RoundedRectangleBorder(radius=8))),
                                 # 检测结果列表
                                 dir_list,
