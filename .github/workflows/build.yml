@@ -16,9 +16,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y             git zip unzip openjdk-17-jdk             autoconf libtool pkg-config             zlib1g-dev libncurses-dev             cmake libffi-dev libssl-dev             libltdl-dev
 
-      - name: Install Buildozer and Cython
+      - name: Install Python build tools
         run: |
-          pip install buildozer cython
+          pip install flet buildozer cython
 
       - name: Build APK
         run: |
