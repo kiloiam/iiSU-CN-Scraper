@@ -833,16 +833,20 @@ def main(page: ft.Page):
         def do_detect(e):
             _rescan_fn[0] = do_detect  # 从权限/SAF页面返回时自动重扫
             dir_list.controls.clear()
-            progress_text = ft.Text("检测中...", size=12, color=TEXT_DIM)
-            dir_list.controls.append(progress_text)
             page.update()
 
-            def _on_progress(msg):
-                progress_text.value = f"检测中 — {msg}"
+            def _scan_thread():
+                # 在后台线程内才显示"检测中..." — 由实际扫描状态驱动
+                progress_text = ft.Text("检测中...", size=12, color=TEXT_DIM)
+                dir_list.controls.append(progress_text)
                 try: page.update()
                 except: pass
 
-            def _scan_thread():
+                def _on_progress(msg):
+                    progress_text.value = f"检测中 — {msg}"
+                    try: page.update()
+                    except: pass
+
                 try:
                     dirs, errors = detect_dirs(on_progress=_on_progress)
                     _last_scan_dirs[:] = dirs
