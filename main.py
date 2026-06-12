@@ -571,7 +571,6 @@ def main(page: ft.Page):
             dir_picker.controls.clear()
             dir_checks.clear()
             batch_btn.visible = False
-            show_scanning()
             page.update()
 
             def _on_progress(msg):
@@ -580,6 +579,8 @@ def main(page: ft.Page):
                 except: pass
 
             def _scan_thread():
+                # 在后台线程内切换为扫描中 — 按钮文本由实际扫描状态驱动
+                show_scanning()
                 dirs, errors = detect_dirs(on_progress=_on_progress)
                 _last_scan_dirs[:] = dirs
                 if dirs:

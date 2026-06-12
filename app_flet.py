@@ -387,10 +387,11 @@ def main(page: ft.Page):
             dir_picker.controls.clear()
             dir_checks.clear()
             batch_btn.visible = False
-            show_scanning()
             page.update()
 
             def _detect():
+                # 在后台线程内切换为扫描中 — 按钮文本由实际扫描状态驱动
+                show_scanning()
                 dirs = detect_dirs()
                 if dirs:
                     show_found(len(dirs))

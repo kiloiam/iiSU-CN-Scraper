@@ -130,10 +130,11 @@ class HomeScreen(Screen):
         self.ids.circle_sub.text = "..."
 
     def detect_release(self):
-        self.ids.circle_sub.text = "检测中..."
+        # 不在此处切换文本；由 _run_detect 根据实际扫描状态驱动
         Clock.schedule_once(self._run_detect, 0.5)
 
     def _run_detect(self, dt):
+        self.ids.circle_sub.text = "检测中..."
         app = App.get_running_app()
         dirs = detect_dirs()
         if dirs:
