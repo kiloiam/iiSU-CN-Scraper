@@ -579,8 +579,7 @@ def main(page: ft.Page):
                 except: pass
 
             def _scan_thread():
-                # 在后台线程内切换为扫描中 — 按钮文本由实际扫描状态驱动
-                show_scanning()
+                # 不切换主标题 — 进度由 btn_sub 展示，结果由 show_found/show_not_found 驱动
                 dirs, errors = detect_dirs(on_progress=_on_progress)
                 _last_scan_dirs[:] = dirs
                 if dirs:
@@ -687,11 +686,6 @@ def main(page: ft.Page):
             btn_title.value = f"发现 {count} 个目录"
             btn_sub.value = "点击选择目标"
             circle_body.bgcolor = CARD_BG
-            page.update()
-
-        def show_scanning():
-            btn_title.value = "检测中..."
-            btn_sub.value = ""
             page.update()
 
         def show_not_found():

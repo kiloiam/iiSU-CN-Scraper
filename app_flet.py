@@ -390,8 +390,6 @@ def main(page: ft.Page):
             page.update()
 
             def _detect():
-                # 在后台线程内切换为扫描中 — 按钮文本由实际扫描状态驱动
-                show_scanning()
                 dirs = detect_dirs()
                 if dirs:
                     show_found(len(dirs))
@@ -471,11 +469,6 @@ def main(page: ft.Page):
             btn_title.value = f"发现 {count} 个目录"
             btn_sub.value = "点击选择目标"
             circle_body.bgcolor = CARD_BG
-            page.update()
-
-        def show_scanning():
-            btn_title.value = "检测中..."
-            btn_sub.value = ""
             page.update()
 
         def show_not_found():
