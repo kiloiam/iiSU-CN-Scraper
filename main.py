@@ -586,7 +586,7 @@ def main(page: ft.Page):
         if page.views and page.views[-1].route == "/":
             if _home_reset_fn[0]:
                 _home_reset_fn[0]()
-            threading.Thread(target=_background_rescan_home, daemon=True).start()
+            page.run_thread(_background_rescan_home)
 
     # ================================================================
     # 首页
@@ -747,7 +747,7 @@ def main(page: ft.Page):
                                 go_settings()
                         threading.Timer(1.2, _delayed_go).start()
 
-            threading.Thread(target=_scan_thread, daemon=True).start()
+            page.run_thread(_scan_thread)
 
         def _pick_one(path):
             """单击卡片 → 只刮削这一个目录"""
@@ -872,14 +872,17 @@ def main(page: ft.Page):
 
         def scan_with_anim(e):
             if scan_state["state"] == "scanning": return
+            if scan_state["state"] == "done":
+                on_scan(e)
+                return
             circle_body.scale = 0.93
             page.update()
-            # 利用 animate_scale 的动画过渡（200ms），不需要 sleep
+            on_scan(e)  # 同步调用，立即切换 UI
+            # 延迟弹回动画
             def _bounce():
                 circle_body.scale = 1.0
                 page.update()
-                on_scan(e)
-            threading.Timer(0.1, _bounce).start()
+            threading.Timer(0.15, _bounce).start()
 
         circle_body = ft.Container(
             width=180, height=180, border_radius=90,
@@ -1001,35 +1004,35 @@ def main(page: ft.Page):
             page.update()
 
             def _scan_thread():
-                # 在后台线程内才显示"检测中..." — 由实际扫描状态驱动
-                progress_text = ft.Text("检测中...", size=12, color=TEXT_DIM)
-                dir_list.controls.append(progress_text)
-                try: page.update()
-                except: pass
-
                 def _on_progress(msg):
-                    progress_text.value = f"检测中 — {msg}"
+                    dir_list.controls[-1].value = f"检测中 — {msg}" if dir_list.controls else msg
                     try: page.update()
                     except: pass
+
+                dir_list.controls.append(ft.Text("检测中...", size=12, color=TEXT_DIM))
+                try: page.update()
+                except: pass
 
                 try:
                     dirs, errors = detect_dirs(on_progress=_on_progress)
                     _last_scan_dirs[:] = dirs
                 except Exception as ex:
                     dirs, errors = [], [str(ex)]
-                dir_list.controls.clear()
+
+                # 原子替换，避免 clear() 中间态闪烁
+                new_controls = []
                 if errors:
                     for err in errors[:3]:
-                        dir_list.controls.append(
+                        new_controls.append(
                             ft.Text(f"\u26a0 {err}", size=12, color="#ff9f43"))
                 if not dirs:
-                    dir_list.controls.append(
+                    new_controls.append(
                         ft.Text("未检测到 ROM 目录", size=12, color=TEXT_DIM) if not errors else
                         ft.Text("无存储权限 \u2192 请到系统设置 \u2192 应用 \u2192 iiSU CN Scraper \u2192 所有文件访问权限", size=12, color="#ff9f43"))
                 else:
                     for label, path in dirs:
                         short = path if len(path) <= 55 else "..." + path[-52:]
-                        dir_list.controls.append(
+                        new_controls.append(
                             ft.TextButton(
                                 content=ft.Column([
                                     ft.Text(label, size=13, color=TEXT, weight=ft.FontWeight.BOLD),
@@ -1042,9 +1045,10 @@ def main(page: ft.Page):
                                 on_click=lambda e, p=path: _set(p),
                             )
                         )
+                dir_list.controls = new_controls
                 page.update()
 
-            threading.Thread(target=_scan_thread, daemon=True).start()
+            page.run_thread(_scan_thread)
 
         def _set(path):
             path = _normalize_android_path(path)
@@ -1405,7 +1409,7 @@ def main(page: ft.Page):
                     start_btn.text = "开始刮削"
                     page.update()
 
-            threading.Thread(target=_run, daemon=True).start()
+            page.run_thread(_run)
 
         start_btn.on_click = do_scrape
 
