@@ -34,23 +34,40 @@ TEXT_DIM   = "#9292a8"
 # ======================================================================
 # ROM 检测
 # ======================================================================
-ROM_ROOTS = [
-    # 通用 ROM 目录
-    "/storage/emulated/0/ROMs", "/storage/emulated/0/roms",
-    "/sdcard/ROMs", "/sdcard/roms",
-    "/storage/emulated/0/Emulation/roms",
-    "/storage/emulated/0/Games",
-    # 下载目录 (有人直接放这里)
-    "/storage/emulated/0/Download",
-    # 外置 SD 卡 (标准路径 + 华为/Honor 变体)
-    "/storage/0000-0000/ROMs", "/storage/0000-0000/roms",
-    # AYN / 安卓掌机
-    "/storage/emulated/0/RetroArch/roms",
-    # 华为/Honor 设备专用 (文件管理器创建的默认路径)
-    "/storage/emulated/0/Documents/ROMs",
-    "/storage/emulated/0/Documents/roms",
-    "/storage/emulated/0/Documents/Games",
-]
+if sys.platform == "win32":
+    ROM_ROOTS = [
+        os.path.expanduser("~/ROMs"),
+        os.path.expanduser("~/Documents/ROMs"),
+        os.path.expanduser("~/Desktop/ROMs"),
+        os.path.expanduser("~/Documents/RetroArch/roms"),
+        os.path.expanduser("~/Documents/Dolphin Emulator/Games"),
+        os.path.expanduser("~/Documents/PCSX2/roms"),
+        "D:\\ROMs", "D:\\Games", "D:\\Emulation\\roms",
+    ]
+elif sys.platform == "darwin":
+    ROM_ROOTS = [
+        os.path.expanduser("~/ROMs"),
+        os.path.expanduser("~/Documents/ROMs"),
+        os.path.expanduser("~/Desktop/ROMs"),
+        os.path.expanduser("~/Documents/RetroArch/roms"),
+        os.path.expanduser("~/Documents/Dolphin Emulator/Games"),
+        os.path.expanduser("~/Library/Application Support/RetroArch/roms"),
+        os.path.expanduser("~/Games"),
+    ]
+else:
+    # Android / Linux
+    ROM_ROOTS = [
+        "/storage/emulated/0/ROMs", "/storage/emulated/0/roms",
+        "/sdcard/ROMs", "/sdcard/roms",
+        "/storage/emulated/0/Emulation/roms",
+        "/storage/emulated/0/Games",
+        "/storage/emulated/0/Download",
+        "/storage/0000-0000/ROMs", "/storage/0000-0000/roms",
+        "/storage/emulated/0/RetroArch/roms",
+        "/storage/emulated/0/Documents/ROMs",
+        "/storage/emulated/0/Documents/roms",
+        "/storage/emulated/0/Documents/Games",
+    ]
 ROM_EXTS = {
     ".gba", ".gbc", ".gb", ".nds", ".3ds", ".n64", ".z64", ".v64",
     ".nes", ".fds", ".sfc", ".smc", ".smd", ".md", ".gen", ".32x",
@@ -80,12 +97,47 @@ SKIP_DIRS = {"Android", "DCIM", "Pictures", "Music", "Movies", "Download",
              "ColorOS", "Snapdrop", "Edit", "Fonts", "Notifications",
              "Sounds", "Ringtones", "Pictures", "Movies", "Podcasts",
              "Recordings", "tbs", "tp", "talkingdata", "bugly", "umeng"}
+
+# 桌面端系统目录 — 避免递归扫描浪费在系统文件上
+if sys.platform == "win32":
+    SKIP_DIRS |= {
+        "Windows", "Program Files", "Program Files (x86)",
+        "ProgramData", "$Recycle.Bin", "System Volume Information",
+        "Recovery", "Config.Msi", "MSOCache", "PerfLogs",
+        "WindowsApps", "AppData", "Application Data",
+        "Local Settings", "NetHood", "PrintHood", "Recent",
+        "SendTo", "Start Menu", "Templates", "Cookies",
+        "Intel", "AMD", "NVIDIA", "Drivers",
+    }
+elif sys.platform == "darwin":
+    SKIP_DIRS |= {
+        "Applications", "Library", "System", "opt", "private",
+        "usr", "bin", "sbin", "etc", "var", "tmp", "cores",
+        "dev", "home", "net",
+        ".Spotlight-V100", ".Trashes", ".fseventsd",
+        ".DocumentRevisions-V100", ".TemporaryItems",
+    }
 SKIP_PREFIXES = ("com.", "org.", "net.", "io.", "cn.", "de.")
 
-ROM_SEARCH_ROOTS = [
-    "/storage/emulated/0",
-    "/sdcard",
-]
+if sys.platform == "win32":
+    ROM_SEARCH_ROOTS = [
+        os.path.expanduser("~"),
+        os.path.expanduser("~/Documents"),
+        os.path.expanduser("~/Desktop"),
+    ]
+elif sys.platform == "darwin":
+    ROM_SEARCH_ROOTS = [
+        os.path.expanduser("~"),
+        os.path.expanduser("~/Documents"),
+        os.path.expanduser("~/Desktop"),
+        "/Volumes",
+    ]
+else:
+    # Android
+    ROM_SEARCH_ROOTS = [
+        "/storage/emulated/0",
+        "/sdcard",
+    ]
 
 def _detect_device_vendor() -> str:
     """Detect device manufacturer for vendor-specific permission intents."""
@@ -159,6 +211,9 @@ def _normalize_android_path(path: str) -> str:
     raw = (path or "").strip().strip('"').strip("'")
     if not raw:
         return ""
+    # Windows 绝对路径 (如 D:\ROMs) — 直接返回，不要当成 Android URI 处理
+    if len(raw) >= 2 and raw[1] == ":":
+        return os.path.normpath(raw)
     if raw.startswith("file://"):
         raw = unquote(raw[7:])
     if raw.startswith("/tree/"):
@@ -172,6 +227,35 @@ def _normalize_android_path(path: str) -> str:
 
 
 def _iter_storage_roots() -> list:
+    if sys.platform == "win32":
+        import string as _string
+        roots = []
+        for letter in _string.ascii_uppercase:
+            if letter in ("A", "B"):
+                continue
+            drive = f"{letter}:\\"
+            if letter == "C":
+                continue  # 已被 ROM_SEARCH_ROOTS ~/ 覆盖
+            if os.path.isdir(drive):
+                roots.append(drive)
+        return roots
+
+    if sys.platform == "darwin":
+        roots = []
+        volumes = "/Volumes"
+        if os.path.isdir(volumes):
+            try:
+                for entry in sorted(os.listdir(volumes)):
+                    if entry.startswith(".") or entry == "Macintosh HD":
+                        continue
+                    full = os.path.join(volumes, entry)
+                    if os.path.isdir(full) and os.access(full, os.R_OK):
+                        roots.append(full)
+            except PermissionError:
+                pass
+        return roots
+
+    # Android / Linux
     roots = ["/storage/emulated/0", "/sdcard"]
     storage = "/storage"
     try:
@@ -182,7 +266,7 @@ def _iter_storage_roots() -> list:
             if os.path.isdir(full) and os.access(full, os.R_OK):
                 roots.append(full)
     except PermissionError:
-        pass  # /storage 不可列 = 无外置 SD
+        pass
     except Exception:
         pass
     # 去重 (follow symlinks)
@@ -313,14 +397,6 @@ def detect_dirs(on_found=None, on_progress=None):
         for label, path in _scan_root(search_root, 2):
             _add(label, path)
 
-    # 3) PC 测试路径
-    for test_root in [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test_roms"),
-        "D:\\Agent\\Open-ClaudeCode\\test_roms",
-    ]:
-        for label, path in _scan_root(test_root, 2):
-            _add(label, path)
-
     errors.extend(_COUNT_ERRORS)
     return found, errors
 
@@ -416,8 +492,11 @@ def _check_storage_permission_on_startup(page: ft.Page):
     if _has_storage_permission():
         return
 
+    def _close_permission_dlg(e=None):
+        page.pop_dialog()
+
     def open_settings(e):
-        page.close(dlg)
+        _close_permission_dlg()
         _open_all_files_access()
         # 注册回扫：用户从设置返回后自动重扫
         if _rescan_fn[0]:
@@ -431,15 +510,17 @@ def _check_storage_permission_on_startup(page: ft.Page):
             color=TEXT_DIM, size=13,
         ),
         actions=[
-            ft.TextButton("稍后", on_click=lambda e: page.close(dlg), style=ft.ButtonStyle(color=TEXT_DIM)),
+            ft.TextButton("稍后", on_click=_close_permission_dlg,
+                          style=ft.ButtonStyle(color=TEXT_DIM)),
             ft.TextButton("去设置", on_click=open_settings, style=ft.ButtonStyle(color=ACCENT)),
         ],
         bgcolor=SURFACE,
     )
-    page.open(dlg)
+    page.show_dialog(dlg)
 
 
 _rescan_fn = [None]
+_home_reset_fn = [None]  # 从刮削页返回首页时恢复 UI
 
 _last_scan_dirs = []  # 缓存上次扫描结果，供后台重扫对比
 
@@ -501,15 +582,17 @@ def main(page: ft.Page):
         if len(page.views) > 1:
             page.views.pop()
             page.update()
-        # 回到首页时后台轻量重扫（不阻塞 UI）
+        # 回到首页时恢复 UI + 后台轻量重扫
         if page.views and page.views[-1].route == "/":
+            if _home_reset_fn[0]:
+                _home_reset_fn[0]()
             threading.Thread(target=_background_rescan_home, daemon=True).start()
 
     # ================================================================
     # 首页
     # ================================================================
     def build_home():
-        scanning = {"busy": False}
+        scan_state = {"state": "idle"}  # idle | scanning | done
 
         # 目录列表区 + 多选
         dir_picker = ft.Column(spacing=8, visible=False)
@@ -526,6 +609,39 @@ def main(page: ft.Page):
             size=14, color=TEXT_DIM, text_align=ft.TextAlign.CENTER,
             spans=[ft.TextSpan("点击中心按钮", ft.TextStyle(color=TEXT_DIM)),
                    ft.TextSpan("\n自动检测 ROM 目录", ft.TextStyle(color=TEXT_DIM))],
+        )
+
+        # 桌面端：扫描未找到时的浏览按钮
+        def _browse_folder(e):
+            try:
+                from tkinter import Tk, filedialog
+                root = Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+                path = filedialog.askdirectory(title="选择 ROM 文件夹")
+                root.destroy()
+                if path:
+                    path = os.path.normpath(path)
+                    n = _count_roms(path)
+                    label = f"{_sys(os.path.basename(path))}  ({n} ROM)" if n else f"{os.path.basename(path)}"
+                    state.rom_dir = path
+                    state.rom_dirs = [path]
+                    btn_icon.name = ft.Icons.CHECK_CIRCLE
+                    btn_icon.color = ACCENT
+                    btn_title.value = "已选择"
+                    btn_sub.value = os.path.basename(path)[:20]
+                    browse_btn.visible = False
+                    status_text.visible = False
+                    page.update()
+                    go_scrape()
+            except Exception:
+                pass
+
+        browse_btn = ft.Button(
+            "浏览文件夹...",
+            style=ft.ButtonStyle(bgcolor=ACCENT, color=TEXT, shape=ft.RoundedRectangleBorder(radius=10)),
+            visible=False,
+            on_click=_browse_folder,
         )
 
         def _build_dir_card(label, path, icon_name):
@@ -564,13 +680,41 @@ def main(page: ft.Page):
             return ft.Icons.FOLDER
 
         def on_scan(e):
-            if scanning["busy"]: return
+            if scan_state["state"] == "scanning":
+                return
+            if scan_state["state"] == "done":
+                def _close_rescan_dlg(ev=None):
+                    page.pop_dialog()
+
+                def do_rescan(ev):
+                    page.pop_dialog()
+                    scan_state["state"] = "idle"
+                    reset_button()
+                    on_scan(None)
+                dlg = ft.AlertDialog(
+                    title=ft.Text("重新扫描", color=TEXT),
+                    content=ft.Text("已有扫描结果，是否重新扫描？", color=TEXT),
+                    actions=[
+                        ft.TextButton("取消", on_click=_close_rescan_dlg),
+                        ft.TextButton("重新扫描", on_click=do_rescan,
+                                      style=ft.ButtonStyle(color=ACCENT)),
+                    ],
+                    bgcolor=SURFACE,
+                )
+                page.show_dialog(dlg)
+                return
             _rescan_fn[0] = on_scan  # 从权限/SAF页面返回时自动重扫
-            scanning["busy"] = True
+            scan_state["state"] = "scanning"
+            btn_icon.name = ft.Icons.HOURGLASS_BOTTOM
+            btn_icon.color = ACCENT
+            btn_title.value = "扫描中..."
+            btn_sub.value = "正在检测 ROM 目录"
             dir_picker.visible = False
             dir_picker.controls.clear()
             dir_checks.clear()
             batch_btn.visible = False
+            browse_btn.visible = False
+            status_text.visible = True
             page.update()
 
             def _on_progress(msg):
@@ -583,37 +727,25 @@ def main(page: ft.Page):
                 dirs, errors = detect_dirs(on_progress=_on_progress)
                 _last_scan_dirs[:] = dirs
                 if dirs:
-                    show_found(len(dirs))
-                    internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
-                    external = [(l, p) for l, p in dirs if "/storage/0000-" in p]
-                    def _add_section(title, items):
-                        if not items: return
-                        dir_picker.controls.append(
-                            ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM)
-                        )
-                        for label, path in items:
-                            dir_picker.controls.append(_build_dir_card(label, path, _guess_icon(path)))
-                    _add_section("内部存储", internal)
-                    if external: _add_section("SD 卡", external)
-                    other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
-                    _add_section("其他", other) if other else None
-                    dir_picker.visible = True
-                    batch_btn.visible = len(dir_checks) > 0
-                    status_text.visible = False
-                    scanning["busy"] = False
+                    _show_results(dirs)
+                    scan_state["state"] = "done"
                 else:
                     if errors:
                         status_text.value = f"权限不足: {'; '.join(errors[:2])}"
                         status_text.color = "#ff9f43"
                     show_not_found()
-                    scanning["busy"] = False
+                    scan_state["state"] = "done"
                 page.update()
-                # 未找到目录则延迟跳转设置页
+                # 桌面端未找到 → 展示浏览按钮；Android 端 → 跳转设置
                 if not dirs:
-                    def _delayed_go():
-                        if not _last_scan_dirs:
-                            go_settings()
-                    threading.Timer(1.2, _delayed_go).start()
+                    if sys.platform in ("win32", "darwin"):
+                        status_text.visible = False
+                        browse_btn.visible = True
+                    else:
+                        def _delayed_go():
+                            if not _last_scan_dirs:
+                                go_settings()
+                        threading.Timer(1.2, _delayed_go).start()
 
             threading.Thread(target=_scan_thread, daemon=True).start()
 
@@ -680,6 +812,25 @@ def main(page: ft.Page):
             circle_body.bgcolor = CARD_BG
             page.update()
 
+        def _show_results(dirs):
+            show_found(len(dirs))
+            internal = [(l, p) for l, p in dirs if "/storage/emulated/" in p or "/sdcard" in p]
+            external = [(l, p) for l, p in dirs if "/storage/0000-" in p]
+            def _add_section(title, items):
+                if not items: return
+                dir_picker.controls.append(
+                    ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_DIM)
+                )
+                for label, path in items:
+                    dir_picker.controls.append(_build_dir_card(label, path, _guess_icon(path)))
+            _add_section("内部存储", internal)
+            if external: _add_section("SD 卡", external)
+            other = [(l, p) for l, p in dirs if (l, p) not in internal and (l, p) not in external]
+            _add_section("其他", other) if other else None
+            dir_picker.visible = True
+            batch_btn.visible = len(dir_checks) > 0
+            status_text.visible = False
+
         def show_found(count):
             btn_icon.name = ft.Icons.CHECK_CIRCLE
             btn_icon.color = ACCENT
@@ -696,9 +847,22 @@ def main(page: ft.Page):
             circle_body.bgcolor = CARD_BG
             page.update()
 
+        # 从刮削页返回时恢复 UI
+        def _reset_home():
+            browse_btn.visible = False
+            if scan_state["state"] == "done":
+                if _last_scan_dirs:
+                    dir_picker.controls.clear()
+                    _show_results(_last_scan_dirs)
+                else:
+                    show_not_found()
+                    status_text.visible = True
+            page.update()
+        _home_reset_fn[0] = _reset_home
+
         # 鼠标悬浮放大 + 点击缩小
         def on_hover_enter(e):
-            if scanning["busy"]: return
+            if scan_state["state"] == "scanning": return
             circle_body.scale = 1.08
             page.update()
 
@@ -707,7 +871,7 @@ def main(page: ft.Page):
             page.update()
 
         def scan_with_anim(e):
-            if scanning["busy"]: return
+            if scan_state["state"] == "scanning": return
             circle_body.scale = 0.93
             page.update()
             # 利用 animate_scale 的动画过渡（200ms），不需要 sleep
@@ -768,6 +932,7 @@ def main(page: ft.Page):
                         ft.Container(height=16),
                         dir_picker,
                         batch_btn,
+                        browse_btn,
                         ft.Container(height=40),
                     ],
                 ),
@@ -1320,4 +1485,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)
